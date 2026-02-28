@@ -1,0 +1,62 @@
+---
+import Layout from '../layouts/Layout.astro';
+import InboxFeed from '../islands/InboxFeed';
+---
+
+<Layout title="Inbox" activeNav="inbox">
+  <div class="space-y-4">
+    <!-- Page header -->
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+          Inbox
+        </h1>
+        <span
+          id="inbox-count"
+          class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+        >
+          ...
+        </span>
+      </div>
+    </div>
+
+    <!-- Feed island -->
+    <InboxFeed client:load />
+
+    <!-- Keyboard hints -->
+    <div
+      class="flex items-center justify-center gap-4 pt-4 pb-2 text-xs text-zinc-400 dark:text-zinc-500"
+    >
+      <span
+        ><kbd
+          class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-200 dark:border-zinc-700"
+          >J</kbd
+        ><span class="ml-1">Down</span></span
+      >
+      <span
+        ><kbd
+          class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-200 dark:border-zinc-700"
+          >K</kbd
+        ><span class="ml-1">Up</span></span
+      >
+      <span
+        ><kbd
+          class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-200 dark:border-zinc-700"
+          >S</kbd
+        ><span class="ml-1">Save</span></span
+      >
+      <span
+        ><kbd
+          class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-200 dark:border-zinc-700"
+          >T</kbd
+        ><span class="ml-1">Trash</span></span
+      >
+      <span
+        ><kbd
+          class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-100 dark:bg-zinc-800 rounded border border-zinc-200 dark:border-zinc-700"
+          >P</kbd
+        ><span class="ml-1">Pin</span></span
+      >
+    </div>
+  </div>
+</Layout>

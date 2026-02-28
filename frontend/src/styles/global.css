@@ -1,0 +1,171 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Theme transition */
+  html {
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  /* Default dark mode body */
+  body {
+    @apply bg-zinc-950 text-zinc-100 antialiased;
+  }
+
+  html:not(.dark) body {
+    @apply bg-zinc-50 text-zinc-900;
+  }
+
+  /* Custom scrollbar — dark */
+  .dark ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .dark ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .dark ::-webkit-scrollbar-thumb {
+    background: rgba(113, 113, 122, 0.4);
+    border-radius: 3px;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(113, 113, 122, 0.6);
+  }
+
+  /* Custom scrollbar — light */
+  html:not(.dark) ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  html:not(.dark) ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  html:not(.dark) ::-webkit-scrollbar-thumb {
+    background: rgba(161, 161, 170, 0.5);
+    border-radius: 3px;
+  }
+
+  html:not(.dark) ::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.7);
+  }
+}
+
+@layer components {
+  /* Toast animation */
+  .toast-enter {
+    animation: slide-up 0.3s ease-out forwards;
+  }
+
+  .toast-exit {
+    animation: fade-out 0.2s ease-out forwards;
+  }
+
+  @keyframes slide-up {
+    0% {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes fade-out {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  /* Slide-in panel from right */
+  .animate-slide-in-right {
+    animation: slide-in-right 0.2s ease-out forwards;
+  }
+
+  @keyframes slide-in-right {
+    0% {
+      transform: translateX(100%);
+    }
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  /* Fade-in for modals */
+  .animate-fade-in {
+    animation: fade-in 0.15s ease-out forwards;
+  }
+
+  @keyframes fade-in {
+    0% {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* Skeleton loading pulse */
+  .skeleton {
+    @apply animate-pulse rounded-xl;
+    background: linear-gradient(
+      90deg,
+      theme('colors.zinc.800') 0%,
+      theme('colors.zinc.700') 50%,
+      theme('colors.zinc.800') 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  html:not(.dark) .skeleton {
+    background: linear-gradient(
+      90deg,
+      theme('colors.zinc.200') 0%,
+      theme('colors.zinc.100') 50%,
+      theme('colors.zinc.200') 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  /* Red glow for Vigilancia nav when unseen hits exist */
+  .vigilancia-glow {
+    animation: vigilancia-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes vigilancia-pulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+    50% {
+      box-shadow: 0 0 8px 2px rgba(239, 68, 68, 0.4);
+    }
+  }
+
+  /* Focus ring */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-zinc-950;
+  }
+
+  html:not(.dark) .focus-ring {
+    @apply focus:ring-offset-white;
+  }
+}
+
+@layer utilities {
+  /* Transition helpers */
+  .transition-theme {
+    transition: background-color 0.2s ease, color 0.2s ease,
+      border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+}

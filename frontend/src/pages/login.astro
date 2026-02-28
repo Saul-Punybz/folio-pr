@@ -1,0 +1,53 @@
+---
+import '../styles/global.css';
+import LoginForm from '../islands/LoginForm';
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Folio — Login" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Login | Folio</title>
+
+    <script is:inline>
+      (function () {
+        const theme = localStorage.getItem('theme');
+        if (theme === 'light') {
+          document.documentElement.classList.remove('dark');
+        } else {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+  </head>
+
+  <body
+    class="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 transition-theme"
+  >
+    <div class="w-full max-w-sm px-4">
+      <!-- Logo -->
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold text-zinc-900 dark:text-zinc-100">
+          Folio
+        </h1>
+        <p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+          Political intelligence, organized.
+        </p>
+      </div>
+
+      <!-- Login card -->
+      <div
+        class="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm dark:shadow-none"
+      >
+        <LoginForm client:load />
+      </div>
+
+      <p class="mt-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
+        Folio v1.0
+      </p>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,53 @@
+# ── Go ────────────────────────────────────────────────────────
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/api
+/worker
+vendor/
+
+# ── Node / Frontend ─────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.cache/
+*.tsbuildinfo
+
+# ── Environment & Secrets ────────────────────────────────────
+.env
+.env.local
+.env.production
+*.pem
+*.key
+
+# ── Docker ───────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── IDE / Editor ─────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+*.log
+
+# ── Coverage / Testing ───────────────────────────────────────
+coverage/
+*.cover
+*.coverprofile
+coverage.out
+coverage.html
+
+# ── Build artifacts ──────────────────────────────────────────
+/tmp/
+/bin/
+/dist/
