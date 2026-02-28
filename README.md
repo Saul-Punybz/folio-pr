@@ -4,7 +4,7 @@
 
 A self-hosted, AI-powered platform for monitoring, analyzing, and archiving news from Puerto Rico and federal sources. Built for journalists, researchers, NGOs, and anyone who needs to track political developments, government grants, and public accountability.
 
-> **Made by [Saul Gonzalez Alonso](https://github.com/Saul-Punybz)**
+> **Made by [Saul A. Gonzalez Alonso](https://github.com/Saul-Punybz) -- saul@puny.bz**
 
 ---
 
@@ -273,4 +273,4 @@ See [LICENSE](LICENSE) for details.
 
 ---
 
-**Made by [Saul Gonzalez Alonso](https://github.com/Saul-Punybz)**
+**Made by [Saul A. Gonzalez Alonso](https://github.com/Saul-Punybz) -- saul@puny.bz**

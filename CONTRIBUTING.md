@@ -52,4 +52,4 @@ Open an issue or start a discussion on GitHub.
 
 ---
 
-**Maintainer:** [Saul Gonzalez Alonso](https://github.com/Saul-Punybz)
+**Maintainer:** [Saul A. Gonzalez Alonso](https://github.com/Saul-Punybz) -- saul@puny.bz

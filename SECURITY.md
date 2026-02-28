@@ -32,4 +32,4 @@ Instead, please email the maintainer directly or use GitHub's private vulnerabil
 
 ---
 
-**Maintainer:** [Saul Gonzalez Alonso](https://github.com/Saul-Punybz)
+**Maintainer:** [Saul A. Gonzalez Alonso](https://github.com/Saul-Punybz) -- saul@puny.bz
