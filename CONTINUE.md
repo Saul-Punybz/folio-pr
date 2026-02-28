@@ -34,7 +34,53 @@ OLLAMA_EMBED_MODEL=nomic-embed-text DOMAIN=localhost ./bin/api
 
 ## Current State (Feb 28, 2026)
 
-### Latest Session — Chat Sessions + Saved Articles Fix (Feb 28)
+### Latest Session — Sources + Intelligence + Telegram Bot (Feb 28, evening)
+
+**Phase A: Sources Fixed**
+- Migration 010: Switched 6 sources from scrape to RSS (NotiCel, Radio Isla, News is My Business, Es Noticia PR, GovInfo, Federal Register)
+- Configured 9 scrape sources with CSS selectors (Primera Hora, El Vocero, Metro PR, WAPA.TV, El Calce, Senado, Camara, La Fortaleza)
+- Disabled 4 broken sources (Jay Fonseca, Noticentro, Caribbean Business, Grants.gov)
+- Added "Test Scrape" button in SourcesManager UI — tests RSS feeds or scrape selectors inline
+- New endpoint: `POST /api/sources/{id}/test`
+
+**Phase B: Entity Graph + Trend Tracking**
+- Migration 010: `entities` table, `article_entities` junction, `articles.entities` JSONB column, `articles.sentiment` column
+- `internal/models/entity.go` — EntityStore (Upsert, LinkToArticle, TopEntities, CoOccurrences)
+- `internal/ai/ollama.go` — Structured `ExtractEntities` (returns people/organizations/places), new `ClassifySentiment` method
+- `internal/scraper/ingest.go` — Enrichment pipeline now persists entities + sentiment
+- `internal/handlers/analytics.go` — 6 endpoints: tag trends, top entities, co-occurrences, sentiment, source health, volume
+- `frontend/src/pages/analytics.astro` + `AnalyticsDashboard.tsx` — Full analytics dashboard with charts, entity leaderboard, sentiment breakdown, source health table
+- Navigation updated with "Analytics" link
+
+**Phase C: Telegram Bot**
+- Migration 011: `telegram_users`, `bot_notifications` tables
+- `internal/intelligence/` — Extracted chat logic from admin handler into reusable package
+- `internal/handlers/admin.go` — Refactored ChatWithNews to delegate to intelligence.Chat()
+- `internal/models/telegram_user.go` — TelegramUserStore
+- `internal/models/notification.go` — NotificationStore (CreateDigest, CreateWatchlistHit, ListPending, MarkDelivered)
+- `internal/telegram/` — 7 files: bot.go, auth.go, commands.go, handlers.go, callbacks.go, format.go, notify.go
+- `cmd/bot/main.go` — Third binary entry point
+- Bot commands: /start, /help, /inbox, /saved, /search, /brief, /watchlist + plain text AI chat
+- Inline keyboards for article actions (save, trash, pin)
+- Notification poller delivers digest + watchlist hit alerts
+- Typing indicator for slow AI responses
+- Worker emits digest notifications after daily brief generation
+- Config: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWLIST` env vars
+
+**Build:**
+```bash
+go build -o bin/api ./cmd/api
+go build -o bin/worker ./cmd/worker
+go build -o bin/bot ./cmd/bot
+cd frontend && npm run build && cd ..
+```
+
+**Run Telegram bot:**
+```bash
+TELEGRAM_BOT_TOKEN="your-token" TELEGRAM_ALLOWLIST="telegram_id:admin@folio.local" ./bin/bot
+```
+
+### Previous Session — Chat Sessions + Saved Articles Fix (Feb 28, morning)
 
 **1. AI Chat Session Persistence (new feature)**
 - New `chat_sessions` table (migration 009) stores full conversation as JSONB
@@ -69,8 +115,13 @@ OLLAMA_EMBED_MODEL=nomic-embed-text DOMAIN=localhost ./bin/api
 - **3 Phases complete**: Inbox triage, search, embeddings, notes, briefs, alerts, export
 - **AI Chat (Inteligencia)**: Ask questions about PR news, auto-saves sessions
 - **Chat History**: Sessions persist across page refreshes, loadable from sidebar
-- **RSS ingestion**: El Nuevo Dia, GAO Reports, CBO Reports (RSS-based sources)
-- **AI enrichment**: Ollama generates summaries, tags, embeddings for each article
+- **RSS ingestion**: 10+ RSS sources (El Nuevo Dia, NotiCel, Radio Isla, GAO, CBO, GovInfo, Federal Register, etc.)
+- **Scrape ingestion**: 8 scrape sources configured (Primera Hora, El Vocero, Metro PR, WAPA, etc.)
+- **AI enrichment**: Ollama generates summaries, tags, entities (people/orgs/places), sentiment, embeddings
+- **Entity Graph**: Deduplicated entity registry with co-occurrence tracking
+- **Analytics Dashboard**: Tag trends, entity leaderboard, sentiment breakdown, source health, article volume
+- **Telegram Bot**: `/inbox`, `/saved`, `/search`, `/brief`, `/watchlist`, AI chat, inline keyboards, notifications
+- **Test Scrape**: Button in Settings to test RSS feeds and scrape selectors before committing
 - **Images**: Extracted from RSS enclosures, media:content, og:image
 - **Placeholder images**: Articles without images show newspaper icon
 - **Save from AI chat**: Web sources saved with snippet as summary
@@ -85,25 +136,22 @@ OLLAMA_EMBED_MODEL=nomic-embed-text DOMAIN=localhost ./bin/api
 ### What Needs Work
 
 #### High Priority
-1. **Configure scrape-based sources** -- 19 sources need `list_urls` and CSS selectors
-2. **Fix RSS feeds that fail parsing**:
-   - Federal Register (Atom format not supported)
-   - GovInfo (feed URL format issue)
-   - Grants.gov (XML format issue)
+1. **Test Telegram bot** -- Set up BotFather token, test all commands, verify notification delivery
+2. **Re-enrich existing articles** -- Run re-enrichment to extract entities + sentiment from existing ~657 articles
+3. **Deploy to Oracle VM** -- `scripts/deploy-oracle.sh` exists but untested
 
 #### Medium Priority
-3. **Deploy to Oracle VM** -- `scripts/deploy-oracle.sh` exists but untested
 4. **Evidence retention lifecycle** -- cron cleanup runs but needs real S3 for archive
 5. **User management** -- Currently single admin user, add user creation UI
 6. **Alert matching UI** -- Show matched articles inline with alert keywords highlighted
 7. **Export improvements** -- Bulk export with date range selection
+8. **Watchlist hit notifications** -- Wire watchlist scan to emit notifications (worker-side)
 
 #### Polish / Nice-to-Have
-8. **Pagination** -- Inbox loads all articles at once; add infinite scroll or pagination
-9. **Dark mode refinement** -- Some newspaper-style elements need dark mode tuning
-10. **Mobile responsive** -- Grid works on mobile (1 col) but action buttons could be improved
-11. **Article deduplication UI** -- Show when duplicates are blocked
-12. **Source health dashboard** -- Show which sources are working/failing
+9. **Pagination** -- Inbox loads all articles at once; add infinite scroll or pagination
+10. **Dark mode refinement** -- Some newspaper-style elements need dark mode tuning
+11. **Mobile responsive** -- Grid works on mobile (1 col) but action buttons could be improved
+12. **Article deduplication UI** -- Show when duplicates are blocked
 13. **Reading time estimate** -- Calculate from clean_text word count
 14. **Keyboard shortcut help overlay** -- Show available shortcuts (? key)
 
@@ -111,11 +159,14 @@ OLLAMA_EMBED_MODEL=nomic-embed-text DOMAIN=localhost ./bin/api
 
 ```
 cmd/api/main.go          -- HTTP server (Chi router, session auth, serves frontend)
-cmd/worker/main.go       -- Background worker (cron: ingestion, cleanup, briefs)
+cmd/worker/main.go       -- Background worker (cron: ingestion, cleanup, briefs, watchlist)
+cmd/bot/main.go          -- Telegram bot binary
 internal/
-  ai/ollama.go           -- Ollama client (summarize, embed, generate)
-  config/                -- Environment config loader
+  ai/ollama.go           -- Ollama client (summarize, embed, generate, entities, sentiment)
+  config/                -- Environment config loader (DB, S3, Ollama, Telegram)
   db/                    -- PostgreSQL connection (pgx), auto-migrations
+  intelligence/          -- Reusable chat logic (extracted from admin handler)
+  telegram/              -- Telegram bot (commands, callbacks, notifications)
   handlers/              -- HTTP handlers (items, search, notes, briefs, watchlist, chat, export, sources, admin)
   middleware/            -- Auth middleware, admin check
   models/               -- DB models (article, source, user, session, note, brief, watchlist, chat_session, fingerprint)
@@ -127,7 +178,7 @@ frontend/
   src/lib/utils.ts      -- Helpers (timeAgo, formatDate, regionColor, etc.)
   src/layouts/          -- Astro layout with sidebar nav
   src/pages/            -- 8 pages (inbox, saved, archive, brief, watchlist, settings, login, index)
-migrations/             -- 9 SQL migrations
+migrations/             -- 11 SQL migrations
 ```
 
 ## Key Files to Edit

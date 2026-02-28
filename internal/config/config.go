@@ -4,14 +4,16 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds the full application configuration.
 type Config struct {
-	DB     DBConfig
-	Server ServerConfig
-	S3     S3Config
-	Ollama OllamaConfig
+	DB       DBConfig
+	Server   ServerConfig
+	S3       S3Config
+	Ollama   OllamaConfig
+	Telegram TelegramConfig
 }
 
 // DBConfig holds PostgreSQL connection parameters.
@@ -58,6 +60,33 @@ type OllamaConfig struct {
 	EmbedModel    string
 }
 
+// TelegramConfig holds Telegram bot parameters.
+type TelegramConfig struct {
+	BotToken  string
+	Allowlist string // format: "telegram_id:email,telegram_id:email"
+}
+
+// ParseAllowlist parses the TELEGRAM_ALLOWLIST string into a map of telegramID -> email.
+func (c TelegramConfig) ParseAllowlist() map[int64]string {
+	result := make(map[int64]string)
+	if c.Allowlist == "" {
+		return result
+	}
+	pairs := strings.Split(c.Allowlist, ",")
+	for _, pair := range pairs {
+		parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		id, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		if err != nil {
+			continue
+		}
+		result[id] = strings.TrimSpace(parts[1])
+	}
+	return result
+}
+
 // Load reads configuration from environment variables with sensible defaults.
 func Load() Config {
 	return Config{
@@ -84,6 +113,10 @@ func Load() Config {
 			Host:          envOr("OLLAMA_HOST", "http://localhost:11434"),
 			InstructModel: envOr("OLLAMA_INSTRUCT_MODEL", "llama3"),
 			EmbedModel:    envOr("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+		},
+		Telegram: TelegramConfig{
+			BotToken:  envOr("TELEGRAM_BOT_TOKEN", ""),
+			Allowlist: envOr("TELEGRAM_ALLOWLIST", ""),
 		},
 	}
 }

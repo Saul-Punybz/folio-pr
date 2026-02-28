@@ -122,30 +122,84 @@ RULES:
 	return parseAndValidateTags(resp), nil
 }
 
-// ExtractEntities asks the LLM to extract key people, organizations, and places.
-func (c *OllamaClient) ExtractEntities(ctx context.Context, text string) ([]string, error) {
-	systemPrompt := `Extract key people, organizations, and places from this article.
+// ExtractedEntities holds categorized entities extracted from article text by
+// the LLM. Each field contains entity names of the corresponding type.
+type ExtractedEntities struct {
+	People        []string `json:"people"`
+	Organizations []string `json:"organizations"`
+	Places        []string `json:"places"`
+}
+
+// ExtractEntities asks the LLM to extract key people, organizations, and places
+// from article text, returning them in categorized form.
+func (c *OllamaClient) ExtractEntities(ctx context.Context, text string) (*ExtractedEntities, error) {
+	systemPrompt := `Extract key entities from this article text. Return a JSON object with these keys:
+- "people": array of person names mentioned
+- "organizations": array of organization/company/agency names
+- "places": array of geographic locations
 
 RULES:
-- Output ONLY a comma-separated list of names (e.g. "Juan García, Senado de PR, San Juan")
-- Do NOT explain your reasoning
-- Do NOT add commentary or descriptions
-- If no entities found, output "none"`
+- Output ONLY valid JSON, nothing else
+- Each array can be empty if no entities of that type are found
+- Use the original names as they appear in the text
+- Do NOT include descriptions or explanations
+
+Example: {"people": ["Juan García", "María López"], "organizations": ["Senado de PR"], "places": ["San Juan"]}`
 
 	resp, err := c.generate(ctx, systemPrompt, text)
 	if err != nil {
 		return nil, err
 	}
 
-	result := parseCSV(resp)
-	// Filter out "none" placeholder.
-	filtered := make([]string, 0, len(result))
-	for _, e := range result {
-		if strings.ToLower(e) != "none" {
-			filtered = append(filtered, e)
+	// Try to parse the JSON response.
+	var result ExtractedEntities
+	if err := json.Unmarshal([]byte(strings.TrimSpace(resp)), &result); err != nil {
+		// If the response contains JSON embedded in other text, try to extract it.
+		if start := strings.Index(resp, "{"); start != -1 {
+			if end := strings.LastIndex(resp, "}"); end > start {
+				if err2 := json.Unmarshal([]byte(resp[start:end+1]), &result); err2 == nil {
+					return &result, nil
+				}
+			}
 		}
+		// Fall back to empty entities on parse failure.
+		return &ExtractedEntities{}, nil
 	}
-	return filtered, nil
+	return &result, nil
+}
+
+// ClassifySentiment asks the LLM to classify the overall sentiment of the text
+// as "positive", "neutral", or "negative". Returns "neutral" if parsing fails.
+func (c *OllamaClient) ClassifySentiment(ctx context.Context, text string) (string, error) {
+	systemPrompt := `Classify the overall sentiment of this article text.
+
+RULES:
+- Output ONLY one word: "positive", "neutral", or "negative"
+- Do NOT explain your reasoning
+- Do NOT add any other text
+- If unsure, output "neutral"`
+
+	resp, err := c.generate(ctx, systemPrompt, text)
+	if err != nil {
+		return "neutral", err
+	}
+
+	// Normalize the response.
+	sentiment := strings.ToLower(strings.TrimSpace(resp))
+
+	// Accept only valid sentiment values.
+	switch sentiment {
+	case "positive", "neutral", "negative":
+		return sentiment, nil
+	default:
+		// Try to find a valid sentiment within the response.
+		for _, valid := range []string{"positive", "negative", "neutral"} {
+			if strings.Contains(sentiment, valid) {
+				return valid, nil
+			}
+		}
+		return "neutral", nil
+	}
 }
 
 // Embed generates a vector embedding for the given text using the embedding

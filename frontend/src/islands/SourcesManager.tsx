@@ -324,6 +324,8 @@ export default function SourcesManager() {
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingSource, setEditingSource] = useState<Source | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, any>>({});
 
   const fetchSources = useCallback(async () => {
     try {
@@ -383,6 +385,18 @@ export default function SourcesManager() {
       setSources((prev) => prev.filter((s) => s.id !== id));
     } catch (err: any) {
       console.error('Failed to delete source:', err);
+    }
+  };
+
+  const handleTest = async (id: string) => {
+    setTestingId(id);
+    try {
+      const result = await api.testSource(id);
+      setTestResults(prev => ({ ...prev, [id]: result }));
+    } catch (err: any) {
+      setTestResults(prev => ({ ...prev, [id]: { success: false, error: err.message } }));
+    } finally {
+      setTestingId(null);
     }
   };
 
@@ -563,6 +577,25 @@ export default function SourcesManager() {
                   </svg>
                 </button>
 
+                {/* Test */}
+                <button
+                  onClick={() => handleTest(source.id)}
+                  className="p-1.5 text-zinc-400 hover:text-emerald-500 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors"
+                  title="Test Scrape"
+                  disabled={testingId === source.id}
+                >
+                  {testingId === source.id ? (
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M12 12h.01" />
+                    </svg>
+                  )}
+                </button>
+
                 {/* Delete */}
                 <button
                   onClick={() => handleDelete(source.id)}
@@ -585,6 +618,15 @@ export default function SourcesManager() {
                 </button>
               </div>
             </div>
+            {testResults[source.id] && (
+              <div className={`mt-2 p-2 rounded-lg text-xs ${testResults[source.id].success ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-400'}`}>
+                {testResults[source.id].success ? (
+                  <>Title: {testResults[source.id].title} | Text: {testResults[source.id].text_length} chars | Image: {testResults[source.id].image_found ? 'Yes' : 'No'}</>
+                ) : (
+                  <>Error: {testResults[source.id].error}</>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

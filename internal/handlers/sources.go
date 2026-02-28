@@ -15,12 +15,16 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/models"
+	"github.com/Saul-Punybz/folio/internal/scraper"
 )
 
 // SourcesHandler groups source management HTTP handlers.
 type SourcesHandler struct {
 	Sources *models.SourceStore
+	Scraper *scraper.Scraper
+	AI      *ai.OllamaClient
 }
 
 // ListSources handles GET /api/sources — returns ALL sources (active and inactive).
@@ -326,4 +330,142 @@ func quickSourceMessage(feedType string) string {
 		return "RSS feed detected and source created. Articles will appear on next worker cycle."
 	}
 	return "No RSS feed detected. Source created as scrape type — configure CSS selectors in Settings > Sources."
+}
+
+// TestScrape handles POST /api/sources/{id}/test.
+// Runs a test discovery + extraction on a single article from the source.
+func (h *SourcesHandler) TestScrape(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid source id"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get the source
+	sources, err := h.Sources.ListAll(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list sources"})
+		return
+	}
+
+	var src *models.Source
+	for i := range sources {
+		if sources[i].ID == id {
+			src = &sources[i]
+			break
+		}
+	}
+	if src == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "source not found"})
+		return
+	}
+
+	// For RSS sources, try to parse the feed and return first item info
+	if src.FeedType == "rss" {
+		if src.FeedURL == "" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   "feed_url is empty",
+			})
+			return
+		}
+		items, err := scraper.ParseFeed(ctx, src.FeedURL)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   fmt.Sprintf("feed parse error: %v", err),
+			})
+			return
+		}
+		if len(items) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   "feed returned 0 items",
+			})
+			return
+		}
+		item := items[0]
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":     true,
+			"title":       item.Title,
+			"text_length": len(item.Description),
+			"image_found": item.ImageURL != "",
+			"items_count": len(items),
+		})
+		return
+	}
+
+	// For scrape sources, try to scrape links and then one article
+	if src.FeedType == "scrape" {
+		if len(src.ListURLs) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   "no list_urls configured",
+			})
+			return
+		}
+		if src.LinkSelector == "" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   "link_selector is empty",
+			})
+			return
+		}
+
+		if h.Scraper == nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   "scraper not configured",
+			})
+			return
+		}
+
+		links, err := h.Scraper.ScrapeLinks(ctx, src.ListURLs[0], src.LinkSelector)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   fmt.Sprintf("scrape links error: %v", err),
+			})
+			return
+		}
+		if len(links) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success": false,
+				"error":   "no links found with the configured selector",
+			})
+			return
+		}
+
+		// Try to scrape the first link
+		selectors := scraper.SourceSelectors{
+			TitleSelector: src.TitleSelector,
+			BodySelector:  src.BodySelector,
+			DateSelector:  src.DateSelector,
+		}
+		article, err := h.Scraper.ScrapeArticle(ctx, links[0], selectors)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"success":     false,
+				"error":       fmt.Sprintf("scrape article error: %v", err),
+				"links_found": len(links),
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":     true,
+			"title":       article.Title,
+			"text_length": len(article.CleanText),
+			"image_found": article.RawHTML != "" && (strings.Contains(article.RawHTML, "og:image") || strings.Contains(article.RawHTML, "twitter:image")),
+			"links_found": len(links),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": false,
+		"error":   fmt.Sprintf("unsupported feed_type: %s", src.FeedType),
+	})
 }

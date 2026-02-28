@@ -304,4 +304,27 @@ export const api = {
 
   deleteChatSession: (id: string): Promise<void> =>
     fetchAPI(`/chat/sessions/${id}`, { method: 'DELETE' }),
+
+  // Analytics
+  getTagTrends: (days = 30): Promise<{ trends: { tag: string; day: string; count: number }[] }> =>
+    fetchAPI(`/analytics/tags?days=${days}`),
+
+  getTopEntities: (days = 30, type = ''): Promise<{ entities: { name: string; type: string; count: number }[] }> =>
+    fetchAPI(`/analytics/entities?days=${days}&type=${type}`),
+
+  getCoOccurrences: (entity: string): Promise<{ co_occurrences: { name: string; type: string; count: number }[] }> =>
+    fetchAPI(`/analytics/co-occurrences?entity=${encodeURIComponent(entity)}`),
+
+  getSentiment: (days = 30): Promise<{ sentiment: { sentiment: string; count: number }[] }> =>
+    fetchAPI(`/analytics/sentiment?days=${days}`),
+
+  getSourceHealth: (): Promise<{ sources: { source: string; article_count: number; last_ingested: string; enriched_count: number }[] }> =>
+    fetchAPI(`/analytics/sources`),
+
+  getArticleVolume: (days = 30): Promise<{ volume: { day: string; count: number }[] }> =>
+    fetchAPI(`/analytics/volume?days=${days}`),
+
+  // Test scrape
+  testSource: (id: string): Promise<{ success: boolean; title: string; text_length: number; image_found: boolean; error?: string }> =>
+    fetchAPI(`/sources/${id}/test`, { method: 'POST' }),
 };

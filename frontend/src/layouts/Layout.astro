@@ -4,7 +4,7 @@ import '../styles/global.css';
 
 interface Props {
   title?: string;
-  activeNav?: 'inbox' | 'inteligencia' | 'saved' | 'archive' | 'vigilancia' | 'settings';
+  activeNav?: 'inbox' | 'inteligencia' | 'saved' | 'archive' | 'vigilancia' | 'analytics' | 'settings';
 }
 
 const { title = 'Folio', activeNav } = Astro.props;
@@ -15,6 +15,7 @@ const navItems = [
   { href: '/saved', label: 'Saved', key: 'saved' as const, badge: false },
   { href: '/archive', label: 'Archive', key: 'archive' as const, badge: false },
   { href: '/watchlist', label: 'Vigilancia', key: 'vigilancia' as const, badge: true },
+  { href: '/analytics', label: 'Analytics', key: 'analytics' as const, badge: false },
 ];
 ---
 

@@ -44,6 +44,7 @@ type Stores struct {
 	Articles     *models.ArticleStore
 	Sources      *models.SourceStore
 	Fingerprints *models.FingerprintStore
+	Entities     *models.EntityStore
 }
 
 // RunIngestion is the main ingestion job. It iterates over all active sources,
@@ -377,11 +378,57 @@ func enrichArticle(ctx context.Context, article *models.Article, rawHTML string,
 	}
 
 	// Extract entities.
-	entities, err := aiClient.ExtractEntities(ctx, aiText)
+	extractedEntities, err := aiClient.ExtractEntities(ctx, aiText)
 	if err != nil {
 		slog.Error("enrichment: extract entities", "id", articleID, "err", err)
 	} else {
-		slog.Debug("enrichment: entities extracted", "id", articleID, "entities", entities)
+		totalEntities := len(extractedEntities.People) + len(extractedEntities.Organizations) + len(extractedEntities.Places)
+		slog.Debug("enrichment: entities extracted", "id", articleID,
+			"people", len(extractedEntities.People),
+			"orgs", len(extractedEntities.Organizations),
+			"places", len(extractedEntities.Places),
+			"total", totalEntities,
+		)
+	}
+
+	// Persist entities to the entities table and link to the article.
+	if stores.Entities != nil && extractedEntities != nil {
+		for _, name := range extractedEntities.People {
+			if entityID, err := stores.Entities.Upsert(ctx, name, "person"); err != nil {
+				slog.Error("enrichment: upsert person entity", "id", articleID, "name", name, "err", err)
+			} else {
+				if err := stores.Entities.LinkToArticle(ctx, articleID, entityID); err != nil {
+					slog.Error("enrichment: link person entity", "id", articleID, "entity", entityID, "err", err)
+				}
+			}
+		}
+		for _, name := range extractedEntities.Organizations {
+			if entityID, err := stores.Entities.Upsert(ctx, name, "organization"); err != nil {
+				slog.Error("enrichment: upsert org entity", "id", articleID, "name", name, "err", err)
+			} else {
+				if err := stores.Entities.LinkToArticle(ctx, articleID, entityID); err != nil {
+					slog.Error("enrichment: link org entity", "id", articleID, "entity", entityID, "err", err)
+				}
+			}
+		}
+		for _, name := range extractedEntities.Places {
+			if entityID, err := stores.Entities.Upsert(ctx, name, "place"); err != nil {
+				slog.Error("enrichment: upsert place entity", "id", articleID, "name", name, "err", err)
+			} else {
+				if err := stores.Entities.LinkToArticle(ctx, articleID, entityID); err != nil {
+					slog.Error("enrichment: link place entity", "id", articleID, "entity", entityID, "err", err)
+				}
+			}
+		}
+	}
+
+	// Classify sentiment.
+	sentiment, err := aiClient.ClassifySentiment(ctx, aiText)
+	if err != nil {
+		slog.Error("enrichment: classify sentiment", "id", articleID, "err", err)
+		sentiment = "neutral"
+	} else {
+		slog.Debug("enrichment: sentiment classified", "id", articleID, "sentiment", sentiment)
 	}
 
 	// Generate embedding.
@@ -399,14 +446,26 @@ func enrichArticle(ctx context.Context, article *models.Article, rawHTML string,
 		}
 	}
 
+	// Update entities and sentiment on the article record.
+	if stores.Entities != nil {
+		entitiesJSON, _ := json.Marshal(extractedEntities)
+		_, execErr := stores.Articles.Pool().Exec(ctx,
+			"UPDATE articles SET entities = $1, sentiment = $2 WHERE id = $3",
+			entitiesJSON, sentiment, articleID)
+		if execErr != nil {
+			slog.Error("enrichment: update entities/sentiment", "id", articleID, "err", execErr)
+		}
+	}
+
 	// Upload evidence to S3.
 	if storageClient.Configured() {
 		extracted, err := json.Marshal(map[string]interface{}{
-			"title":    article.Title,
-			"text":     article.CleanText,
-			"tags":     tags,
-			"entities": entities,
-			"summary":  summary,
+			"title":     article.Title,
+			"text":      article.CleanText,
+			"tags":      tags,
+			"entities":  extractedEntities,
+			"summary":   summary,
+			"sentiment": sentiment,
 		})
 		if err != nil {
 			slog.Error("enrichment: marshal extracted", "id", articleID, "err", err)

@@ -55,11 +55,15 @@ func main() {
 	briefStore := models.NewBriefStore(pool)
 	watchlistOrgStore := models.NewWatchlistOrgStore(pool)
 	watchlistHitStore := models.NewWatchlistHitStore(pool)
+	entityStore := models.NewEntityStore(pool)
+	telegramUserStore := models.NewTelegramUserStore(pool)
+	notificationStore := models.NewNotificationStore(pool)
 
 	stores := scraper.Stores{
 		Articles:     articleStore,
 		Sources:      sourceStore,
 		Fingerprints: fingerprintStore,
+		Entities:     entityStore,
 	}
 
 	// Create scraper.
@@ -143,6 +147,15 @@ func main() {
 
 		slog.Info("cron: daily brief generation triggered")
 		scraper.GenerateDailyBrief(jobCtx, articleStore, briefStore, aiClient)
+
+		// Create digest notification for all telegram-linked users.
+		brief, briefErr := briefStore.GetLatest(jobCtx)
+		if briefErr == nil && brief != nil {
+			tUsers, _ := telegramUserStore.ListAll(jobCtx)
+			for _, tu := range tUsers {
+				_ = notificationStore.CreateDigest(jobCtx, tu.UserID, brief.Summary)
+			}
+		}
 	})
 	if err != nil {
 		slog.Error("worker: add daily brief cron", "err", err)

@@ -78,6 +78,8 @@ func main() {
 	}
 	sourcesHandler := &handlers.SourcesHandler{
 		Sources: sourceStore,
+		Scraper: scraper.NewScraper(),
+		AI:      ai.NewClient(cfg.Ollama.Host, cfg.Ollama.InstructModel, cfg.Ollama.EmbedModel),
 	}
 	notesHandler := &handlers.NotesHandler{
 		Notes:    noteStore,
@@ -112,6 +114,10 @@ func main() {
 	feedHandler := &handlers.FeedHandler{
 		Users: userStore,
 		Hits:  watchlistHitStore,
+	}
+
+	analyticsHandler := &handlers.AnalyticsHandler{
+		Pool: pool,
 	}
 
 	sc := scraper.NewScraper()
@@ -203,6 +209,14 @@ func main() {
 		r.Put("/api/chat/sessions/{id}", chatHandler.UpdateSession)
 		r.Delete("/api/chat/sessions/{id}", chatHandler.DeleteSession)
 
+		// Analytics (authenticated, not admin-only)
+		r.Get("/api/analytics/tags", analyticsHandler.TagTrends)
+		r.Get("/api/analytics/entities", analyticsHandler.TopEntities)
+		r.Get("/api/analytics/co-occurrences", analyticsHandler.CoOccurrences)
+		r.Get("/api/analytics/sentiment", analyticsHandler.SentimentDistribution)
+		r.Get("/api/analytics/sources", analyticsHandler.SourceHealth)
+		r.Get("/api/analytics/volume", analyticsHandler.ArticleVolume)
+
 		// Export.
 		r.Get("/api/items/{id}/export", exportHandler.ExportArticle)
 		r.Post("/api/export", exportHandler.ExportBulk)
@@ -219,6 +233,7 @@ func main() {
 			r.Put("/api/sources/{id}", sourcesHandler.UpdateSource)
 			r.Patch("/api/sources/{id}/toggle", sourcesHandler.ToggleSource)
 			r.Delete("/api/sources/{id}", sourcesHandler.DeleteSource)
+			r.Post("/api/sources/{id}/test", sourcesHandler.TestScrape)
 		})
 
 		// Admin actions.
