@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Saul-Punybz/folio/internal/models"
@@ -48,6 +49,33 @@ func SessionAuth(sessions *models.SessionStore, users *models.UserStore) func(ht
 			}
 
 			ctx := context.WithValue(r.Context(), userContextKey, user)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// AutoAuth returns middleware that automatically authenticates as the admin user.
+// For local-only macOS app — no login required.
+func AutoAuth(users *models.UserStore) func(http.Handler) http.Handler {
+	var (
+		cachedUser *models.User
+		once       sync.Once
+	)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			once.Do(func() {
+				u, err := users.GetByEmail(r.Context(), "admin@folio.local")
+				if err != nil {
+					slog.Error("auto-auth: admin user not found", "err", err)
+					return
+				}
+				cachedUser = u
+			})
+			if cachedUser == nil {
+				http.Error(w, `{"error":"admin user not found"}`, http.StatusInternalServerError)
+				return
+			}
+			ctx := context.WithValue(r.Context(), userContextKey, cachedUser)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

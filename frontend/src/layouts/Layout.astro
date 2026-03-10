@@ -181,12 +181,9 @@ const navSections = [
         }
       });
 
-      // Logout handler
-      document.getElementById('logout-btn')?.addEventListener('click', async () => {
-        try {
-          await fetch('/api/logout', { method: 'POST', credentials: 'include' });
-        } catch (e) { /* ignore */ }
-        window.location.href = '/login';
+      // Logout handler (no-op for local app, just reload)
+      document.getElementById('logout-btn')?.addEventListener('click', () => {
+        window.location.href = '/inbox';
       });
 
       // Navigate to archive search on Enter in nav search

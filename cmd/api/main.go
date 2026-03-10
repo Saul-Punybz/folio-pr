@@ -193,17 +193,21 @@ func main() {
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(60 * time.Second))
+	r.Use(middleware.MaxBodySize(10 << 20)) // 10 MB max body
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   []string{"http://localhost:*", "https://localhost:*", "http://127.0.0.1:*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
+	// Login rate limiter: 10 attempts per 15 minutes per IP.
+	loginLimiter := middleware.NewRateLimiter(10, 15*time.Minute)
+
 	// Public routes.
 	r.Get("/api/health", handlers.Health)
-	r.Post("/api/login", authHandler.Login)
+	r.With(middleware.RateLimit(loginLimiter)).Post("/api/login", authHandler.Login)
 	r.Get("/feed/{token}.xml", feedHandler.ServeFeed)
 
 	// Authenticated routes.

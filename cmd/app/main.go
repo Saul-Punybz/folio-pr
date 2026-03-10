@@ -339,8 +339,9 @@ func setupRouter(
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, chimw.RealIP, chimw.Logger, chimw.Recoverer)
 	r.Use(chimw.Timeout(60 * time.Second))
+	r.Use(middleware.MaxBodySize(10 << 20)) // 10 MB max body
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   []string{"http://localhost:*", "https://localhost:*", "http://127.0.0.1:*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
@@ -349,14 +350,22 @@ func setupRouter(
 
 	// Public routes.
 	r.Get("/api/health", handlers.Health)
-	r.Post("/api/login", authHandler.Login)
 	r.Get("/feed/{token}.xml", feedHandler.ServeFeed)
 
-	// Authenticated routes.
+	// All routes auto-authenticated (local macOS app, no login needed).
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.SessionAuth(sessionStore, userStore))
+		r.Use(middleware.AutoAuth(userStore))
 
-		r.Post("/api/logout", authHandler.Logout)
+		// Auth compatibility endpoints (no-op for local app).
+		r.Post("/api/login", func(w http.ResponseWriter, r *http.Request) {
+			user := middleware.UserFromContext(r.Context())
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"user":{"id":"` + user.ID.String() + `","email":"` + user.Email + `","role":"` + user.Role + `"}}`))
+		})
+		r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"logged out"}`))
+		})
 		r.Get("/api/me", authHandler.Me)
 
 		r.Get("/api/items", itemsHandler.ListItems)
