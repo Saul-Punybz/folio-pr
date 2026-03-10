@@ -537,6 +537,149 @@ func (s *ArticleStore) Search(ctx context.Context, query string, from, to time.T
 	return articles, rows.Err()
 }
 
+// SearchByKeywords searches articles using ILIKE on individual keywords extracted
+// from the topic. Unlike FTS, this handles accented vs unaccented characters
+// naturally (e.g. "energia" matches "energía"). Filters out geographic terms
+// like "puerto rico" to focus on topical keywords. Searches across all statuses.
+func (s *ArticleStore) SearchByKeywords(ctx context.Context, topic string, limit int) ([]Article, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+
+	stopwords := map[string]bool{
+		"el": true, "la": true, "los": true, "las": true, "un": true, "una": true,
+		"de": true, "del": true, "en": true, "y": true, "o": true, "que": true,
+		"es": true, "ha": true, "se": true, "con": true, "por": true,
+		"para": true, "al": true, "como": true, "su": true, "a": true,
+		"the": true, "is": true, "are": true, "in": true, "of": true, "and": true,
+		"on": true, "to": true, "for": true, "at": true,
+	}
+	// Geographic terms that appear in most PR articles — skip to focus on topic
+	geoterms := map[string]bool{
+		"puerto": true, "rico": true, "isla": true, "boricua": true,
+	}
+
+	words := strings.Fields(strings.ToLower(topic))
+	var keywords []string
+	for _, w := range words {
+		w = strings.Trim(w, "¿?¡!.,;:\"'()[]")
+		if len(w) >= 3 && !stopwords[w] && !geoterms[w] {
+			keywords = append(keywords, w)
+		}
+	}
+
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+
+	// Build AND conditions: all topic keywords must match in title or summary
+	var conditions []string
+	var args []any
+	for i, kw := range keywords {
+		argN := i + 1
+		conditions = append(conditions, fmt.Sprintf(
+			"(title ILIKE '%%' || $%d || '%%' OR summary ILIKE '%%' || $%d || '%%')",
+			argN, argN))
+		args = append(args, kw)
+	}
+
+	// Exclude trashed articles
+	argN := len(args) + 1
+	q := fmt.Sprintf(`
+		SELECT id, title, source, url, canonical_url, region, published_at,
+		       clean_text, summary, image_url, status, pinned, evidence_policy,
+		       evidence_expires_at, tags, created_at
+		FROM articles
+		WHERE (%s) AND status != 'trashed'
+		ORDER BY published_at DESC NULLS LAST
+		LIMIT $%d
+	`, strings.Join(conditions, " AND "), argN)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("article search by keywords: %w", err)
+	}
+	defer rows.Close()
+
+	var articles []Article
+	for rows.Next() {
+		a := scanArticleFromRow(rows)
+		if a == nil {
+			return nil, fmt.Errorf("article search by keywords scan: failed")
+		}
+		articles = append(articles, *a)
+	}
+
+	return articles, rows.Err()
+}
+
+// SearchByVector finds articles semantically similar to the given embedding vector
+// using pgvector cosine distance. Returns articles with similarity above the threshold,
+// ordered by similarity. Cosine distance is 0 (identical) to 2 (opposite);
+// we convert to a 0-1 relevance score: relevance = 1 - (distance / 2).
+func (s *ArticleStore) SearchByVector(ctx context.Context, embedding []float32, limit int, minRelevance float64) ([]Article, []float64, error) {
+	if limit <= 0 {
+		limit = 15
+	}
+	if minRelevance <= 0 {
+		minRelevance = 0.55 // default: only reasonably similar
+	}
+
+	// Format embedding as pgvector string: [0.1,0.2,...]
+	parts := make([]string, len(embedding))
+	for i, v := range embedding {
+		parts[i] = fmt.Sprintf("%f", v)
+	}
+	vecStr := "[" + strings.Join(parts, ",") + "]"
+
+	// maxDist converts minRelevance to cosine distance threshold
+	// relevance = 1 - dist/2, so dist = 2*(1 - relevance)
+	maxDist := 2.0 * (1.0 - minRelevance)
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, title, source, url, canonical_url, region, published_at,
+		       clean_text, summary, image_url, status, pinned, evidence_policy,
+		       evidence_expires_at, tags, created_at,
+		       embedding <=> $1::vector AS distance
+		FROM articles
+		WHERE embedding IS NOT NULL
+		  AND status != 'trashed'
+		  AND (embedding <=> $1::vector) < $2
+		ORDER BY embedding <=> $1::vector
+		LIMIT $3
+	`, vecStr, maxDist, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("article search by vector: %w", err)
+	}
+	defer rows.Close()
+
+	var articles []Article
+	var relevances []float64
+	for rows.Next() {
+		var a Article
+		var distance float64
+		var tagsJSON []byte
+		err := rows.Scan(
+			&a.ID, &a.Title, &a.Source, &a.URL, &a.CanonicalURL,
+			&a.Region, &a.PublishedAt, &a.CleanText, &a.Summary,
+			&a.ImageURL, &a.Status, &a.Pinned, &a.EvidencePolicy,
+			&a.EvidenceExpiresAt, &tagsJSON, &a.CreatedAt,
+			&distance,
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("article search by vector scan: %w", err)
+		}
+		if tagsJSON != nil {
+			_ = json.Unmarshal(tagsJSON, &a.Tags)
+		}
+		articles = append(articles, a)
+		relevances = append(relevances, 1.0-distance/2.0)
+	}
+
+	return articles, relevances, rows.Err()
+}
+
 // ExistsByURL checks whether an article with the given URL already exists.
 func (s *ArticleStore) ExistsByURL(ctx context.Context, rawURL string) (bool, error) {
 	var exists bool

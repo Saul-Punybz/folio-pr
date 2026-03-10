@@ -35,6 +35,7 @@ Tu centro de inteligencia politica de Puerto Rico, ahora en Telegram.
 /search &lt;query&gt; - Buscar articulos
 /brief - Resumen diario de inteligencia
 /watchlist - Alertas de vigilancia
+/research &lt;tema&gt; - Investigacion profunda
 /help - Lista de comandos
 
 Tambien puedes enviar cualquier pregunta como texto libre y el asistente de IA te respondera usando las noticias locales.`, escapeHTML(user.Email))
@@ -68,6 +69,8 @@ func (b *Bot) handleHelp(ctx context.Context, bot *tgbot.Bot, update *tgmodels.U
 /search &lt;query&gt; - Buscar articulos por palabra clave
 /brief - Ver el resumen diario de inteligencia
 /watchlist - Ver alertas recientes de tu lista de vigilancia
+/research &lt;tema&gt; - Lanzar investigacion profunda sobre un tema
+/research status - Ver estado de investigaciones
 /help - Mostrar este mensaje
 
 <b>Chat con IA:</b>

@@ -17,6 +17,7 @@ import (
 
 	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/config"
+	"github.com/Saul-Punybz/folio/internal/crawler"
 	"github.com/Saul-Punybz/folio/internal/db"
 	"github.com/Saul-Punybz/folio/internal/handlers"
 	"github.com/Saul-Punybz/folio/internal/middleware"
@@ -55,6 +56,18 @@ func main() {
 	watchlistHitStore := models.NewWatchlistHitStore(pool)
 	fingerprintStore := models.NewFingerprintStore(pool)
 	chatSessionStore := models.NewChatSessionStore(pool)
+	researchProjectStore := models.NewResearchProjectStore(pool)
+	researchFindingStore := models.NewResearchFindingStore(pool)
+	entityStore := models.NewEntityStore(pool)
+
+	// Crawler stores.
+	crawlDomainStore := models.NewCrawlDomainStore(pool)
+	crawlQueueStore := models.NewCrawlQueueStore(pool)
+	crawledPageStore := models.NewCrawledPageStore(pool)
+	crawlLinkStore := models.NewCrawlLinkStore(pool)
+	crawlRunStore := models.NewCrawlRunStore(pool)
+	pageEntityStore := models.NewPageEntityStore(pool)
+	entityRelStore := models.NewEntityRelationshipStore(pool)
 
 	// S3 storage client (for export handler).
 	storageClient, storageErr := storage.NewClient(ctx, cfg.S3)
@@ -116,6 +129,13 @@ func main() {
 		Hits:  watchlistHitStore,
 	}
 
+	researchHandler := &handlers.ResearchHandler{
+		Projects: researchProjectStore,
+		Findings: researchFindingStore,
+		Articles: articleStore,
+		AI:       aiClient,
+	}
+
 	analyticsHandler := &handlers.AnalyticsHandler{
 		Pool: pool,
 	}
@@ -128,6 +148,40 @@ func main() {
 		AI:           aiClient,
 		Scraper:      sc,
 		Storage:      storageClient,
+	}
+
+	crawlerDeps := crawler.Deps{
+		Domains:  crawlDomainStore,
+		Queue:    crawlQueueStore,
+		Pages:    crawledPageStore,
+		Links:    crawlLinkStore,
+		Runs:     crawlRunStore,
+		Entities: entityStore,
+		PageEnts: pageEntityStore,
+		Rels:     entityRelStore,
+		AI:       aiClient,
+	}
+	// Escritos stores.
+	escritoStore := models.NewEscritoStore(pool)
+	escritoSourceStore := models.NewEscritoSourceStore(pool)
+
+	escritosHandler := &handlers.EscritosHandler{
+		Escritos: escritoStore,
+		Sources:  escritoSourceStore,
+		Articles: articleStore,
+		AI:       aiClient,
+	}
+
+	crawlerHandler := &handlers.CrawlerHandler{
+		Domains:   crawlDomainStore,
+		Queue:     crawlQueueStore,
+		Pages:     crawledPageStore,
+		Links:     crawlLinkStore,
+		Runs:      crawlRunStore,
+		Entities:  entityStore,
+		PageEnts:  pageEntityStore,
+		Rels:      entityRelStore,
+		CrawlDeps: crawlerDeps,
 	}
 
 	// Router.
@@ -208,6 +262,54 @@ func main() {
 		r.Post("/api/chat/sessions", chatHandler.CreateSession)
 		r.Put("/api/chat/sessions/{id}", chatHandler.UpdateSession)
 		r.Delete("/api/chat/sessions/{id}", chatHandler.DeleteSession)
+
+		// Research (deep investigation).
+		r.Route("/api/research", func(r chi.Router) {
+			r.Post("/", researchHandler.CreateProject)
+			r.Get("/", researchHandler.ListProjects)
+			r.Get("/{id}", researchHandler.GetProject)
+			r.Get("/{id}/findings", researchHandler.GetFindings)
+			r.Post("/{id}/stop", researchHandler.StopProject)
+			r.Post("/{id}/run", researchHandler.TriggerResearch)
+			r.Delete("/{id}", researchHandler.DeleteProject)
+		})
+
+		// Escritos (SEO article generator).
+		r.Route("/api/escritos", func(r chi.Router) {
+			r.Post("/", escritosHandler.CreateEscrito)
+			r.Get("/", escritosHandler.ListEscritos)
+			r.Get("/{id}", escritosHandler.GetEscrito)
+			r.Put("/{id}", escritosHandler.UpdateEscrito)
+			r.Post("/{id}/regenerate", escritosHandler.RegenerateEscrito)
+			r.Post("/{id}/improve", escritosHandler.ImproveEscrito)
+			r.Post("/{id}/seo-score", escritosHandler.RecalcSEO)
+			r.Delete("/{id}", escritosHandler.DeleteEscrito)
+			r.Post("/{id}/export", escritosHandler.ExportEscrito)
+		})
+
+		// Crawler.
+		r.Route("/api/crawler", func(r chi.Router) {
+			r.Get("/stats", crawlerHandler.Stats)
+			r.Get("/runs", crawlerHandler.ListRuns)
+			r.Get("/queue", crawlerHandler.QueueStats)
+			r.Get("/pages", crawlerHandler.ListPages)
+			r.Get("/pages/search", crawlerHandler.SearchPages)
+			r.Get("/pages/changes", crawlerHandler.ListChangedPages)
+			r.Get("/pages/{id}", crawlerHandler.GetPage)
+			r.Get("/graph", crawlerHandler.GetGraph)
+			r.Get("/graph/{entityId}/relations", crawlerHandler.GetEntityRelations)
+			r.Get("/domains", crawlerHandler.ListDomains)
+
+			// Admin-only crawler operations
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAdmin)
+				r.Post("/domains", crawlerHandler.CreateDomain)
+				r.Put("/domains/{id}", crawlerHandler.UpdateDomain)
+				r.Patch("/domains/{id}/toggle", crawlerHandler.ToggleDomain)
+				r.Delete("/domains/{id}", crawlerHandler.DeleteDomain)
+				r.Post("/trigger", crawlerHandler.TriggerCrawl)
+			})
+		})
 
 		// Analytics (authenticated, not admin-only)
 		r.Get("/api/analytics/tags", analyticsHandler.TagTrends)

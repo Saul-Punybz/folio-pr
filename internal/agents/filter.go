@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// IsSpamHit is the exported version of isSpamHit for use by other packages (e.g. research).
+func IsSpamHit(url, title, snippet string, orgKeywords ...string) bool {
+	return isSpamHit(url, title, snippet, orgKeywords...)
+}
+
 // isSpamHit returns true if the URL/title/snippet indicate non-PR, NSFW, or irrelevant content.
 // This is applied BEFORE inserting into the DB to prevent noise.
 // orgKeywords is optional — when provided, Reddit results must mention at least one keyword.

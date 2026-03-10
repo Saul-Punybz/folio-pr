@@ -34,7 +34,50 @@ OLLAMA_EMBED_MODEL=nomic-embed-text DOMAIN=localhost ./bin/api
 
 ## Current State (Feb 28, 2026)
 
-### Latest Session — Sources + Intelligence + Telegram Bot (Feb 28, evening)
+### Latest Session — Deep Research / Investigacion Profunda (Feb 28, night)
+
+**New feature: Deep Research** — Give a topic like "reciclaje" and the system sends multiple agents to investigate across the internet, collects everything (news, web pages, references), runs in the background, then presents an organized research dossier. Always in the context of Puerto Rico.
+
+**Migration 012:** `research_projects` + `research_findings` tables with dedup indexes
+
+**New files (11):**
+- `migrations/012_research.sql` — DB schema
+- `internal/models/research.go` — ResearchProjectStore + ResearchFindingStore
+- `internal/research/research.go` — RunProject orchestrator
+- `internal/research/queries.go` — AI keyword expansion + query generation (8-15 variations)
+- `internal/research/phase1.go` — Broad search (6 agents: Google News, Bing, DDG, local DB, YouTube, Reddit)
+- `internal/research/phase2.go` — Deep scrape (top 50 pages + 1-level deep crawl for top 10)
+- `internal/research/phase3.go` — AI synthesis (relevance scoring, entity aggregation, timeline, dossier generation)
+- `internal/handlers/research.go` — 7 HTTP endpoints (CRUD + findings + stop + run)
+- `internal/telegram/research.go` — /research command (create + status)
+- `frontend/src/pages/research.astro` — Astro page
+- `frontend/src/islands/ResearchDesk.tsx` — Two-panel React island with 4 tabs (Hallazgos, Dossier, Entidades, Cronologia)
+
+**Modified files (6):**
+- `cmd/api/main.go` — Research stores + handler + routes
+- `cmd/worker/main.go` — Research cron (every 2 min picks up queued projects)
+- `cmd/bot/main.go` — ResearchProjects store in BotDeps
+- `internal/telegram/bot.go` — ResearchProjects field + /research handler registration
+- `internal/agents/filter.go` — Exported `IsSpamHit()` wrapper for use by research package
+- `frontend/src/layouts/Layout.astro` — Added "Investigacion" nav link
+- `frontend/src/lib/api.ts` — Research interfaces + 7 API methods
+
+**API Endpoints:**
+- `POST /api/research` — Create project (topic + optional keywords)
+- `GET /api/research` — List user's projects
+- `GET /api/research/{id}` — Get project + stats
+- `GET /api/research/{id}/findings` — Paginated findings (filter: source_type)
+- `POST /api/research/{id}/stop` — Cancel ongoing research
+- `POST /api/research/{id}/run` — Trigger research manually
+- `DELETE /api/research/{id}` — Delete project + findings
+
+**Telegram:** `/research <tema>` creates project, `/research status` lists all
+
+**Frontend:** `/research` page with two-panel layout, auto-polls every 10s for active projects
+
+**Next:** Test end-to-end with running Ollama, test Telegram /research command
+
+### Previous Session — Sources + Intelligence + Telegram Bot (Feb 28, evening)
 
 **Phase A: Sources Fixed**
 - Migration 010: Switched 6 sources from scrape to RSS (NotiCel, Radio Isla, News is My Business, Es Noticia PR, GovInfo, Federal Register)

@@ -111,7 +111,7 @@ func Load() Config {
 		},
 		Ollama: OllamaConfig{
 			Host:          envOr("OLLAMA_HOST", "http://localhost:11434"),
-			InstructModel: envOr("OLLAMA_INSTRUCT_MODEL", "llama3"),
+			InstructModel: envOr("OLLAMA_INSTRUCT_MODEL", "llama3.2:3b"),
 			EmbedModel:    envOr("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
 		},
 		Telegram: TelegramConfig{

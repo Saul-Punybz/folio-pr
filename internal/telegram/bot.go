@@ -14,42 +14,45 @@ import (
 
 // Bot wraps the Telegram bot with Folio-specific handlers and data access.
 type Bot struct {
-	bot           *tgbot.Bot
-	allowlist     map[int64]string // telegramID -> folio email
-	articles      *models.ArticleStore
-	briefs        *models.BriefStore
-	watchlistHits *models.WatchlistHitStore
-	watchlistOrgs *models.WatchlistOrgStore
-	telegramUsers *models.TelegramUserStore
-	notifications *models.NotificationStore
-	aiClient      *ai.OllamaClient
-	users         *models.UserStore
+	bot              *tgbot.Bot
+	allowlist        map[int64]string // telegramID -> folio email
+	articles         *models.ArticleStore
+	briefs           *models.BriefStore
+	watchlistHits    *models.WatchlistHitStore
+	watchlistOrgs    *models.WatchlistOrgStore
+	telegramUsers    *models.TelegramUserStore
+	notifications    *models.NotificationStore
+	researchProjects *models.ResearchProjectStore
+	aiClient         *ai.OllamaClient
+	users            *models.UserStore
 }
 
 // BotDeps groups the dependencies required by the Telegram bot.
 type BotDeps struct {
-	Articles      *models.ArticleStore
-	Briefs        *models.BriefStore
-	WatchlistHits *models.WatchlistHitStore
-	WatchlistOrgs *models.WatchlistOrgStore
-	TelegramUsers *models.TelegramUserStore
-	Notifications *models.NotificationStore
-	AI            *ai.OllamaClient
-	Users         *models.UserStore
+	Articles         *models.ArticleStore
+	Briefs           *models.BriefStore
+	WatchlistHits    *models.WatchlistHitStore
+	WatchlistOrgs    *models.WatchlistOrgStore
+	TelegramUsers    *models.TelegramUserStore
+	Notifications    *models.NotificationStore
+	ResearchProjects *models.ResearchProjectStore
+	AI               *ai.OllamaClient
+	Users            *models.UserStore
 }
 
 // New creates a new Telegram bot with the given token, user allowlist, and dependencies.
 func New(token string, allowlist map[int64]string, deps BotDeps) (*Bot, error) {
 	b := &Bot{
-		allowlist:     allowlist,
-		articles:      deps.Articles,
-		briefs:        deps.Briefs,
-		watchlistHits: deps.WatchlistHits,
-		watchlistOrgs: deps.WatchlistOrgs,
-		telegramUsers: deps.TelegramUsers,
-		notifications: deps.Notifications,
-		aiClient:      deps.AI,
-		users:         deps.Users,
+		allowlist:        allowlist,
+		articles:         deps.Articles,
+		briefs:           deps.Briefs,
+		watchlistHits:    deps.WatchlistHits,
+		watchlistOrgs:    deps.WatchlistOrgs,
+		telegramUsers:    deps.TelegramUsers,
+		notifications:    deps.Notifications,
+		researchProjects: deps.ResearchProjects,
+		aiClient:         deps.AI,
+		users:            deps.Users,
 	}
 
 	opts := []tgbot.Option{
@@ -70,6 +73,7 @@ func New(token string, allowlist map[int64]string, deps BotDeps) (*Bot, error) {
 	b.bot.RegisterHandler(tgbot.HandlerTypeMessageText, "/search", tgbot.MatchTypePrefix, b.handleSearch)
 	b.bot.RegisterHandler(tgbot.HandlerTypeMessageText, "/brief", tgbot.MatchTypePrefix, b.handleBrief)
 	b.bot.RegisterHandler(tgbot.HandlerTypeMessageText, "/watchlist", tgbot.MatchTypePrefix, b.handleWatchlist)
+	b.bot.RegisterHandler(tgbot.HandlerTypeMessageText, "/research", tgbot.MatchTypePrefix, b.handleResearch)
 
 	// Register callback query handler for inline keyboard buttons.
 	b.bot.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, "", tgbot.MatchTypePrefix, b.handleCallback)

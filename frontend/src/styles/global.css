@@ -19,8 +19,8 @@
 
   /* Custom scrollbar — dark */
   .dark ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   .dark ::-webkit-scrollbar-track {
@@ -28,18 +28,18 @@
   }
 
   .dark ::-webkit-scrollbar-thumb {
-    background: rgba(113, 113, 122, 0.4);
+    background: rgba(113, 113, 122, 0.3);
     border-radius: 3px;
   }
 
   .dark ::-webkit-scrollbar-thumb:hover {
-    background: rgba(113, 113, 122, 0.6);
+    background: rgba(113, 113, 122, 0.5);
   }
 
   /* Custom scrollbar — light */
   html:not(.dark) ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   html:not(.dark) ::-webkit-scrollbar-track {
@@ -47,16 +47,160 @@
   }
 
   html:not(.dark) ::-webkit-scrollbar-thumb {
-    background: rgba(161, 161, 170, 0.5);
+    background: rgba(161, 161, 170, 0.4);
     border-radius: 3px;
   }
 
   html:not(.dark) ::-webkit-scrollbar-thumb:hover {
-    background: rgba(161, 161, 170, 0.7);
+    background: rgba(161, 161, 170, 0.6);
   }
 }
 
 @layer components {
+
+  /* ─── Sidebar — Dark Mode ─── */
+  .dark .sidebar {
+    background: linear-gradient(180deg, #1a1625 0%, #15121e 100%);
+    border-color: rgba(139, 92, 246, 0.08);
+  }
+
+  .dark .sidebar-text {
+    color: #e4e0ee;
+  }
+
+  .dark .sidebar-section-label {
+    color: rgba(167, 139, 250, 0.45);
+  }
+
+  .dark .sidebar-icon-muted {
+    color: rgba(167, 139, 250, 0.35);
+  }
+
+  .dark .sidebar-search {
+    background: rgba(139, 92, 246, 0.06);
+    border: 1px solid rgba(139, 92, 246, 0.1);
+    color: #d4d0e0;
+  }
+
+  .dark .sidebar-search::placeholder {
+    color: rgba(167, 139, 250, 0.3);
+  }
+
+  .dark .sidebar-search:focus {
+    background: rgba(139, 92, 246, 0.1);
+    border-color: rgba(139, 92, 246, 0.25);
+  }
+
+  .dark .sidebar-border {
+    border-color: rgba(139, 92, 246, 0.08);
+  }
+
+  .dark .sidebar-item-active {
+    background: rgba(139, 92, 246, 0.12);
+    color: #c4b5fd;
+  }
+
+  .dark .sidebar-item-active svg {
+    color: #a78bfa;
+  }
+
+  .dark .sidebar-item-inactive {
+    color: #8b8598;
+  }
+
+  .dark .sidebar-item-inactive:hover {
+    background: rgba(139, 92, 246, 0.07);
+    color: #c4b5fd;
+  }
+
+  .dark .sidebar-item-inactive:hover svg {
+    color: #a78bfa;
+  }
+
+  /* ─── Sidebar — Light Mode ─── */
+  html:not(.dark) .sidebar {
+    background: linear-gradient(180deg, #faf9fc 0%, #f3f1f7 100%);
+    border-color: #e8e5ef;
+  }
+
+  html:not(.dark) .sidebar-text {
+    color: #2d2640;
+  }
+
+  html:not(.dark) .sidebar-section-label {
+    color: #9b8fb8;
+  }
+
+  html:not(.dark) .sidebar-icon-muted {
+    color: #9b8fb8;
+  }
+
+  html:not(.dark) .sidebar-search {
+    background: #eeecf4;
+    border: 1px solid #e0dce8;
+    color: #3d3555;
+  }
+
+  html:not(.dark) .sidebar-search::placeholder {
+    color: #a99ec0;
+  }
+
+  html:not(.dark) .sidebar-search:focus {
+    background: #e8e4f0;
+    border-color: #c4b5fd;
+  }
+
+  html:not(.dark) .sidebar-border {
+    border-color: #e8e5ef;
+  }
+
+  html:not(.dark) .sidebar-item-active {
+    background: #ece8f6;
+    color: #6d28d9;
+  }
+
+  html:not(.dark) .sidebar-item-active svg {
+    color: #7c3aed;
+  }
+
+  html:not(.dark) .sidebar-item-inactive {
+    color: #7c7494;
+  }
+
+  html:not(.dark) .sidebar-item-inactive:hover {
+    background: #edeaf4;
+    color: #6d28d9;
+  }
+
+  html:not(.dark) .sidebar-item-inactive:hover svg {
+    color: #7c3aed;
+  }
+
+  /* Sidebar scroll - hide scrollbar by default, show on hover */
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  .sidebar-scroll:hover {
+    scrollbar-color: rgba(139, 92, 246, 0.2) transparent;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  .sidebar-scroll:hover::-webkit-scrollbar-thumb {
+    background: rgba(139, 92, 246, 0.2);
+  }
+
+  /* ─── Animations ─── */
+
   /* Toast animation */
   .toast-enter {
     animation: slide-up 0.3s ease-out forwards;
@@ -154,7 +298,7 @@
 
   /* Focus ring */
   .focus-ring {
-    @apply focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-zinc-950;
+    @apply focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-zinc-950;
   }
 
   html:not(.dark) .focus-ring {

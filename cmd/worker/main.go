@@ -17,8 +17,11 @@ import (
 	"github.com/Saul-Punybz/folio/internal/agents"
 	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/config"
+	"github.com/Saul-Punybz/folio/internal/crawler"
 	"github.com/Saul-Punybz/folio/internal/db"
+	"github.com/Saul-Punybz/folio/internal/generator"
 	"github.com/Saul-Punybz/folio/internal/models"
+	"github.com/Saul-Punybz/folio/internal/research"
 	"github.com/Saul-Punybz/folio/internal/scraper"
 	"github.com/Saul-Punybz/folio/internal/storage"
 )
@@ -58,6 +61,19 @@ func main() {
 	entityStore := models.NewEntityStore(pool)
 	telegramUserStore := models.NewTelegramUserStore(pool)
 	notificationStore := models.NewNotificationStore(pool)
+	researchProjectStore := models.NewResearchProjectStore(pool)
+	researchFindingStore := models.NewResearchFindingStore(pool)
+	escritoStore := models.NewEscritoStore(pool)
+	escritoSourceStore := models.NewEscritoSourceStore(pool)
+
+	// Crawler stores.
+	crawlDomainStore := models.NewCrawlDomainStore(pool)
+	crawlQueueStore := models.NewCrawlQueueStore(pool)
+	crawledPageStore := models.NewCrawledPageStore(pool)
+	crawlLinkStore := models.NewCrawlLinkStore(pool)
+	crawlRunStore := models.NewCrawlRunStore(pool)
+	pageEntityStore := models.NewPageEntityStore(pool)
+	entityRelStore := models.NewEntityRelationshipStore(pool)
 
 	stores := scraper.Stores{
 		Articles:     articleStore,
@@ -180,6 +196,119 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("worker: add watchlist scan cron", "err", err)
+		os.Exit(1)
+	}
+
+	// Research: every 2 minutes, pick up queued deep research projects.
+	_, err = c.AddFunc("*/2 * * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+
+		jobCtx, jobCancel := context.WithTimeout(ctx, 2*time.Hour)
+		defer jobCancel()
+
+		queued, qErr := researchProjectStore.ListQueued(jobCtx)
+		if qErr != nil || len(queued) == 0 {
+			return
+		}
+
+		slog.Info("cron: research project picked up", "id", queued[0].ID, "topic", queued[0].Topic)
+		research.RunProject(jobCtx, research.Deps{
+			Projects:     researchProjectStore,
+			Findings:     researchFindingStore,
+			Articles:     articleStore,
+			CrawledPages: crawledPageStore,
+			AI:           aiClient,
+		}, queued[0].ID)
+	})
+	if err != nil {
+		slog.Error("worker: add research cron", "err", err)
+		os.Exit(1)
+	}
+
+	// Escritos: every 2 minutes, pick up queued SEO article generation.
+	_, err = c.AddFunc("*/2 * * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+
+		jobCtx, jobCancel := context.WithTimeout(ctx, 30*time.Minute)
+		defer jobCancel()
+
+		queued, qErr := escritoStore.ListQueued(jobCtx)
+		if qErr != nil || len(queued) == 0 {
+			return
+		}
+
+		slog.Info("cron: escrito picked up", "id", queued[0].ID, "topic", queued[0].Topic)
+		generator.RunGeneration(jobCtx, generator.Deps{
+			Escritos: escritoStore,
+			Sources:  escritoSourceStore,
+			Articles: articleStore,
+			AI:       aiClient,
+		}, queued[0].ID, nil)
+	})
+	if err != nil {
+		slog.Error("worker: add escritos cron", "err", err)
+		os.Exit(1)
+	}
+
+	// Crawler: every 2 hours — fetch from queue, extract links, detect changes.
+	crawlerDeps := crawler.Deps{
+		Domains:  crawlDomainStore,
+		Queue:    crawlQueueStore,
+		Pages:    crawledPageStore,
+		Links:    crawlLinkStore,
+		Runs:     crawlRunStore,
+		Entities: entityStore,
+		PageEnts: pageEntityStore,
+		Rels:     entityRelStore,
+		AI:       aiClient,
+	}
+
+	_, err = c.AddFunc("0 */2 * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+
+		jobCtx, jobCancel := context.WithTimeout(ctx, 2*time.Hour)
+		defer jobCancel()
+
+		slog.Info("cron: crawler job triggered")
+		crawler.RunCrawl(jobCtx, crawlerDeps, 500)
+	})
+	if err != nil {
+		slog.Error("worker: add crawler cron", "err", err)
+		os.Exit(1)
+	}
+
+	// Recrawl: daily at 2am — re-enqueue pages past next_crawl_at.
+	_, err = c.AddFunc("0 2 * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+
+		jobCtx, jobCancel := context.WithTimeout(ctx, 30*time.Minute)
+		defer jobCancel()
+
+		slog.Info("cron: recrawl job triggered")
+		crawler.RunRecrawl(jobCtx, crawlerDeps)
+	})
+	if err != nil {
+		slog.Error("worker: add recrawl cron", "err", err)
+		os.Exit(1)
+	}
+
+	// Crawler enrichment: every 30 minutes — AI enrichment for un-enriched pages.
+	_, err = c.AddFunc("*/30 * * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+
+		jobCtx, jobCancel := context.WithTimeout(ctx, 1*time.Hour)
+		defer jobCancel()
+
+		slog.Info("cron: crawler enrichment job triggered")
+		crawler.RunEnrichment(jobCtx, crawlerDeps, 50)
+	})
+	if err != nil {
+		slog.Error("worker: add crawler enrichment cron", "err", err)
 		os.Exit(1)
 	}
 

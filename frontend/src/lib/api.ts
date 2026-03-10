@@ -115,6 +115,208 @@ export interface ChatMessage {
   webSources?: { title: string; source: string; url: string; snippet?: string; savable?: boolean }[];
 }
 
+export interface ResearchProject {
+  id: string;
+  user_id: string;
+  topic: string;
+  keywords: string[];
+  status: 'queued' | 'searching' | 'scraping' | 'synthesizing' | 'done' | 'failed' | 'cancelled';
+  phase: number;
+  progress: Record<string, number>;
+  dossier: string;
+  entities: { people?: string[]; organizations?: string[]; places?: string[] };
+  timeline: { date: string; event: string; source_url: string }[];
+  error_msg: string;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+  findings_count?: number;
+}
+
+export interface ResearchFinding {
+  id: string;
+  project_id: string;
+  url: string;
+  url_hash: string;
+  title: string;
+  snippet: string;
+  clean_text: string;
+  source_type: 'google_news' | 'bing_news' | 'web' | 'local' | 'youtube' | 'reddit' | 'deep_crawl';
+  sentiment: 'positive' | 'neutral' | 'negative' | 'unknown';
+  relevance: number;
+  image_url: string | null;
+  published_at: string | null;
+  scraped: boolean;
+  tags: string[];
+  entities: Record<string, string[]>;
+  created_at: string;
+}
+
+export interface ResearchProjectsResponse {
+  projects: ResearchProject[];
+  count: number;
+}
+
+export interface ResearchFindingsResponse {
+  findings: ResearchFinding[];
+  count: number;
+}
+
+// ── Escritos (SEO Article Generator) ─────────────────────────────
+
+export interface SEOComponentScore {
+  score: number;
+  max: number;
+  details: string;
+}
+
+// ── Crawler (Government Document Crawler) ───────────────────────
+
+export interface CrawlDomain {
+  id: string;
+  domain: string;
+  label: string;
+  category: string;
+  max_depth: number;
+  recrawl_hours: number;
+  priority: number;
+  active: boolean;
+  page_count: number;
+  last_crawled_at: string | null;
+  created_at: string;
+}
+
+export interface CrawledPage {
+  id: string;
+  url: string;
+  url_hash: string;
+  domain_id: string;
+  title: string;
+  clean_text: string;
+  content_hash: string;
+  summary: string;
+  tags: string[];
+  entities: Record<string, string[]>;
+  sentiment: string;
+  links_out: number;
+  links_in: number;
+  depth: number;
+  status_code: number;
+  content_type: string;
+  content_length: number;
+  changed: boolean;
+  change_summary: string;
+  enriched: boolean;
+  crawl_count: number;
+  first_seen_at: string;
+  last_crawled_at: string;
+  next_crawl_at: string | null;
+  created_at: string;
+}
+
+export interface CrawlRun {
+  id: string;
+  status: string;
+  pages_crawled: number;
+  pages_new: number;
+  pages_changed: number;
+  pages_failed: number;
+  started_at: string;
+  finished_at: string | null;
+  error_message: string;
+}
+
+export interface CrawlLink {
+  id: string;
+  source_page_id: string;
+  target_url: string;
+  anchor_text: string;
+}
+
+export interface GraphNode {
+  id: string;
+  name: string;
+  type: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relation_type: string;
+  strength: number;
+}
+
+export interface CrawlerStatsResponse {
+  total_pages: number;
+  total_links: number;
+  total_domains: number;
+  queue: Record<string, number>;
+  latest_run: CrawlRun | null;
+}
+
+export interface SEOScore {
+  total: number;
+  keyword_density: SEOComponentScore;
+  title_quality: SEOComponentScore;
+  meta_description: SEOComponentScore;
+  readability: SEOComponentScore;
+  structure: SEOComponentScore;
+  ai_cleanliness: SEOComponentScore;
+  warnings?: string[];
+}
+
+export interface ArticleSection {
+  heading: string;
+  angle: string;
+  word_target: number;
+  source_ids?: string[];
+}
+
+export interface Escrito {
+  id: string;
+  user_id: string;
+  topic: string;
+  slug: string;
+  title: string;
+  meta_description: string;
+  keywords: string[];
+  hashtags: string[];
+  content: string;
+  article_plan: ArticleSection[];
+  seo_score: SEOScore;
+  status: 'queued' | 'planning' | 'generating' | 'scoring' | 'done' | 'failed';
+  phase: number;
+  progress: Record<string, any>;
+  publish_status: 'draft' | 'reviewing' | 'published';
+  word_count: number;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EscritoSource {
+  id: string;
+  escrito_id: string;
+  article_id: string;
+  relevance: number;
+  used_in_section: string;
+  article_title: string;
+  article_source: string;
+  article_url: string;
+}
+
+export interface EscritosResponse {
+  escritos: Escrito[];
+  count: number;
+}
+
+export interface EscritoDetailResponse {
+  escrito: Escrito;
+  sources: EscritoSource[];
+}
+
 async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
@@ -327,4 +529,117 @@ export const api = {
   // Test scrape
   testSource: (id: string): Promise<{ success: boolean; title: string; text_length: number; image_found: boolean; error?: string }> =>
     fetchAPI(`/sources/${id}/test`, { method: 'POST' }),
+
+  // Research (Deep Investigation)
+  createResearchProject: (topic: string, keywords?: string[]): Promise<ResearchProject> =>
+    fetchAPI('/research', { method: 'POST', body: JSON.stringify({ topic, keywords: keywords || [] }) }),
+
+  getResearchProjects: (): Promise<ResearchProjectsResponse> =>
+    fetchAPI('/research'),
+
+  getResearchProject: (id: string): Promise<{ project: ResearchProject; findings_count: number }> =>
+    fetchAPI(`/research/${id}`),
+
+  getResearchFindings: (id: string, params?: { source_type?: string; limit?: number; offset?: number }): Promise<ResearchFindingsResponse> => {
+    const qs = new URLSearchParams();
+    if (params?.source_type) qs.set('source_type', params.source_type);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    return fetchAPI(`/research/${id}/findings?${qs}`);
+  },
+
+  stopResearchProject: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/research/${id}/stop`, { method: 'POST' }),
+
+  runResearchProject: (id: string): Promise<{ status: string; message: string }> =>
+    fetchAPI(`/research/${id}/run`, { method: 'POST' }),
+
+  deleteResearchProject: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/research/${id}`, { method: 'DELETE' }),
+
+  // Escritos (SEO Article Generator)
+  createEscrito: (topic: string, articleIds?: string[]): Promise<Escrito> =>
+    fetchAPI('/escritos', { method: 'POST', body: JSON.stringify({ topic, article_ids: articleIds || [] }) }),
+
+  getEscritos: (): Promise<EscritosResponse> =>
+    fetchAPI('/escritos'),
+
+  getEscrito: (id: string): Promise<EscritoDetailResponse> =>
+    fetchAPI(`/escritos/${id}`),
+
+  updateEscrito: (id: string, data: Partial<{
+    title: string;
+    meta_description: string;
+    content: string;
+    keywords: string[];
+    hashtags: string[];
+    publish_status: string;
+  }>): Promise<Escrito> =>
+    fetchAPI(`/escritos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  regenerateEscrito: (id: string): Promise<{ status: string; message: string }> =>
+    fetchAPI(`/escritos/${id}/regenerate`, { method: 'POST' }),
+
+  improveEscrito: (id: string, instructions: string): Promise<{ status: string; message: string }> =>
+    fetchAPI(`/escritos/${id}/improve`, { method: 'POST', body: JSON.stringify({ instructions }) }),
+
+  recalcSEO: (id: string): Promise<SEOScore> =>
+    fetchAPI(`/escritos/${id}/seo-score`, { method: 'POST' }),
+
+  deleteEscrito: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/escritos/${id}`, { method: 'DELETE' }),
+
+  exportEscrito: (id: string, format: 'markdown' | 'html' = 'markdown'): Promise<{ format: string; content: string }> =>
+    fetchAPI(`/escritos/${id}/export`, { method: 'POST', body: JSON.stringify({ format }) }),
+
+  // Crawler (Government Document Crawler)
+  getCrawlerStats: (): Promise<CrawlerStatsResponse> =>
+    fetchAPI('/crawler/stats'),
+
+  getCrawlerRuns: (limit = 20): Promise<{ runs: CrawlRun[]; count: number }> =>
+    fetchAPI(`/crawler/runs?limit=${limit}`),
+
+  getCrawlerQueue: (): Promise<{ queue: Record<string, number> }> =>
+    fetchAPI('/crawler/queue'),
+
+  getCrawlerPages: (params?: { limit?: number; offset?: number; domain_id?: string }): Promise<{ pages: CrawledPage[]; count: number }> => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    if (params?.domain_id) qs.set('domain_id', params.domain_id);
+    return fetchAPI(`/crawler/pages?${qs}`);
+  },
+
+  searchCrawlerPages: (q: string, limit = 50): Promise<{ pages: CrawledPage[]; count: number }> =>
+    fetchAPI(`/crawler/pages/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+
+  getCrawlerChangedPages: (limit = 50): Promise<{ pages: CrawledPage[]; count: number }> =>
+    fetchAPI(`/crawler/pages/changes?limit=${limit}`),
+
+  getCrawlerPage: (id: string): Promise<{ page: CrawledPage; links_out: CrawlLink[]; links_in: CrawlLink[]; entities: any[] }> =>
+    fetchAPI(`/crawler/pages/${id}`),
+
+  getCrawlerGraph: (limit = 50): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> =>
+    fetchAPI(`/crawler/graph?limit=${limit}`),
+
+  getCrawlerEntityRelations: (entityId: string): Promise<{ relationships: any[]; entities: any[] }> =>
+    fetchAPI(`/crawler/graph/${entityId}/relations`),
+
+  getCrawlerDomains: (): Promise<{ domains: CrawlDomain[]; count: number }> =>
+    fetchAPI('/crawler/domains'),
+
+  createCrawlerDomain: (data: { domain: string; label: string; category: string; max_depth: number; recrawl_hours: number; priority: number }): Promise<CrawlDomain> =>
+    fetchAPI('/crawler/domains', { method: 'POST', body: JSON.stringify(data) }),
+
+  updateCrawlerDomain: (id: string, data: { label: string; category: string; max_depth: number; recrawl_hours: number; priority: number }): Promise<{ status: string }> =>
+    fetchAPI(`/crawler/domains/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  toggleCrawlerDomain: (id: string, active: boolean): Promise<{ status: string }> =>
+    fetchAPI(`/crawler/domains/${id}/toggle`, { method: 'PATCH', body: JSON.stringify({ active }) }),
+
+  deleteCrawlerDomain: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/crawler/domains/${id}`, { method: 'DELETE' }),
+
+  triggerCrawl: (): Promise<{ status: string; message: string }> =>
+    fetchAPI('/crawler/trigger', { method: 'POST' }),
 };

@@ -4,18 +4,31 @@ import '../styles/global.css';
 
 interface Props {
   title?: string;
-  activeNav?: 'inbox' | 'inteligencia' | 'saved' | 'archive' | 'vigilancia' | 'analytics' | 'settings';
+  activeNav?: 'inbox' | 'inteligencia' | 'saved' | 'archive' | 'vigilancia' | 'investigacion' | 'escritos' | 'crawler' | 'analytics' | 'settings';
 }
 
 const { title = 'Folio', activeNav } = Astro.props;
 
-const navItems = [
-  { href: '/inbox', label: 'Inbox', key: 'inbox' as const, badge: false },
-  { href: '/brief', label: 'Inteligencia', key: 'inteligencia' as const, badge: false },
-  { href: '/saved', label: 'Saved', key: 'saved' as const, badge: false },
-  { href: '/archive', label: 'Archive', key: 'archive' as const, badge: false },
-  { href: '/watchlist', label: 'Vigilancia', key: 'vigilancia' as const, badge: true },
-  { href: '/analytics', label: 'Analytics', key: 'analytics' as const, badge: false },
+const navSections = [
+  {
+    label: 'Principal',
+    items: [
+      { href: '/inbox', label: 'Inbox', key: 'inbox' as const, badge: false, icon: 'inbox' },
+      { href: '/brief', label: 'Inteligencia', key: 'inteligencia' as const, badge: false, icon: 'brain' },
+      { href: '/saved', label: 'Guardados', key: 'saved' as const, badge: false, icon: 'bookmark' },
+      { href: '/archive', label: 'Archivo', key: 'archive' as const, badge: false, icon: 'archive' },
+    ],
+  },
+  {
+    label: 'Herramientas',
+    items: [
+      { href: '/watchlist', label: 'Vigilancia', key: 'vigilancia' as const, badge: true, icon: 'eye' },
+      { href: '/research', label: 'Investigacion', key: 'investigacion' as const, badge: false, icon: 'search' },
+      { href: '/escritos', label: 'Escritos', key: 'escritos' as const, badge: false, icon: 'pen' },
+      { href: '/crawler', label: 'Crawler', key: 'crawler' as const, badge: false, icon: 'globe' },
+      { href: '/analytics', label: 'Analytics', key: 'analytics' as const, badge: false, icon: 'chart' },
+    ],
+  },
 ];
 ---
 
@@ -41,144 +54,138 @@ const navItems = [
     </script>
   </head>
 
-  <body class="min-h-screen">
-    <!-- Navigation -->
-    <nav
-      class="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl transition-theme"
+  <body class="min-h-screen flex">
+    <!-- Sidebar -->
+    <aside
+      class="sidebar fixed top-0 left-0 h-screen w-[220px] flex flex-col z-50 border-r transition-theme"
+      id="sidebar"
     >
-      <div class="max-w-5xl mx-auto px-4">
-        <div class="flex items-center justify-between h-14">
-          <!-- Left: Logo -->
-          <a href="/inbox" class="flex items-center gap-2 shrink-0">
-            <span
-              class="font-bold text-xl tracking-tight text-zinc-900 dark:text-zinc-100"
-            >
-              Folio
-            </span>
-          </a>
+      <!-- Logo -->
+      <div class="px-5 pt-6 pb-4">
+        <a href="/inbox" class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center">
+            <span class="text-white font-bold text-sm">F</span>
+          </div>
+          <span class="font-semibold text-[15px] tracking-tight sidebar-text">Folio</span>
+        </a>
+      </div>
 
-          <!-- Center: Nav links -->
-          <div class="flex items-center gap-1">
-            {
-              navItems.map((item) => (
+      <!-- Search -->
+      <div class="px-3 pb-3">
+        <div class="relative">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sidebar-icon-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Buscar..."
+            class="w-full pl-8 pr-3 py-2 text-xs sidebar-search rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-500 transition-all"
+            id="nav-search"
+          />
+        </div>
+      </div>
+
+      <!-- Nav sections -->
+      <nav class="flex-1 overflow-y-auto px-3 space-y-5 sidebar-scroll">
+        {navSections.map((section) => (
+          <div>
+            <p class="px-2 mb-1.5 text-[10px] font-semibold uppercase tracking-widest sidebar-section-label">
+              {section.label}
+            </p>
+            <div class="space-y-0.5">
+              {section.items.map((item) => (
                 <a
                   href={item.href}
                   id={item.badge ? 'vigilancia-nav' : undefined}
                   class:list={[
-                    'relative px-3 py-1.5 text-sm font-medium rounded-lg transition-colors',
+                    'sidebar-item group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-all',
                     activeNav === item.key
-                      ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-                      : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/50',
+                      ? 'sidebar-item-active'
+                      : 'sidebar-item-inactive',
                   ]}
                 >
-                  {item.label}
+                  <span class="sidebar-icon w-4 h-4 shrink-0" data-icon={item.icon}></span>
+                  <span class="truncate">{item.label}</span>
                   {item.badge && (
                     <span
                       id="vigilancia-badge"
-                      class="hidden ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-red-500 text-white animate-pulse"
+                      class="hidden ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-red-500 text-white"
                     />
                   )}
                 </a>
-              ))
-            }
-          </div>
-
-          <!-- Right: Search, Theme, Settings, Logout -->
-          <div class="flex items-center gap-2 shrink-0">
-            <!-- Search -->
-            <div class="relative hidden sm:block">
-              <svg
-                class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-                ></path>
-              </svg>
-              <input
-                type="text"
-                placeholder="Search..."
-                class="w-44 pl-8 pr-3 py-1.5 text-sm bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-theme"
-                id="nav-search"
-              />
+              ))}
             </div>
-
-            <!-- Theme Toggle -->
-            <ThemeToggle client:load />
-
-            <!-- Settings -->
-            <a
-              href="/settings"
-              class:list={[
-                'p-2 rounded-lg transition-colors',
-                activeNav === 'settings'
-                  ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/50',
-              ]}
-              title="Settings"
-            >
-              <svg
-                class="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z"
-                ></path>
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-              </svg>
-            </a>
-
-            <!-- Logout -->
-            <button
-              id="logout-btn"
-              class="p-2 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
-              title="Logout"
-            >
-              <svg
-                class="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"
-                ></path>
-              </svg>
-            </button>
           </div>
+        ))}
+      </nav>
+
+      <!-- Bottom actions -->
+      <div class="px-3 pb-4 pt-2 space-y-0.5 border-t sidebar-border mt-auto">
+        <a
+          href="/settings"
+          class:list={[
+            'sidebar-item flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-all',
+            activeNav === 'settings' ? 'sidebar-item-active' : 'sidebar-item-inactive',
+          ]}
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span>Ajustes</span>
+        </a>
+
+        <div class="flex items-center justify-between px-2.5 py-2">
+          <ThemeToggle client:load />
+          <button
+            id="logout-btn"
+            class="sidebar-item-inactive p-1.5 rounded-lg transition-all hover:text-red-400"
+            title="Cerrar sesion"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+            </svg>
+          </button>
         </div>
       </div>
-    </nav>
+    </aside>
 
     <!-- Main content -->
-    <main class="max-w-5xl mx-auto px-4 py-6">
-      <slot />
+    <main class="flex-1 ml-[220px] min-h-screen">
+      <div class="max-w-[1200px] mx-auto px-6 py-6">
+        <slot />
+      </div>
     </main>
 
-    <!-- Logout handler -->
+    <!-- Inject nav icons + handlers -->
     <script is:inline>
+      // SVG icons for nav items
+      const icons = {
+        inbox: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-17.399 0V5.25A2.25 2.25 0 014.5 3h15a2.25 2.25 0 012.25 2.25v8.25m-17.399 0l-.97 4.843A1.5 1.5 0 004.873 21h14.254a1.5 1.5 0 001.49-1.707l-.97-4.843" /></svg>',
+        brain: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" /></svg>',
+        bookmark: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" /></svg>',
+        archive: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>',
+        eye: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
+        search: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 17.25m-4.5-15H5.625c-.621 0-1.125.504-1.125 1.125v16.5c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm3.75 11.625a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" /></svg>',
+        pen: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>',
+        globe: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>',
+        chart: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" /></svg>',
+      };
+
+      // Inject SVG icons into nav items
+      document.querySelectorAll('.sidebar-icon[data-icon]').forEach(el => {
+        const key = el.getAttribute('data-icon');
+        if (key && icons[key]) {
+          el.innerHTML = icons[key];
+          el.querySelector('svg').classList.add('w-4', 'h-4');
+        }
+      });
+
+      // Logout handler
       document.getElementById('logout-btn')?.addEventListener('click', async () => {
         try {
           await fetch('/api/logout', { method: 'POST', credentials: 'include' });
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) { /* ignore */ }
         window.location.href = '/login';
       });
 
@@ -204,10 +211,8 @@ const navItems = [
               if (data.unseen > 0) {
                 badge.textContent = data.unseen > 99 ? '99+' : String(data.unseen);
                 badge.classList.remove('hidden');
-                nav?.classList.add('vigilancia-glow');
               } else {
                 badge.classList.add('hidden');
-                nav?.classList.remove('vigilancia-glow');
               }
             }
           }

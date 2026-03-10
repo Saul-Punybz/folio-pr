@@ -50,6 +50,7 @@ func main() {
 	watchlistHitStore := models.NewWatchlistHitStore(pool)
 	telegramUserStore := models.NewTelegramUserStore(pool)
 	notificationStore := models.NewNotificationStore(pool)
+	researchProjectStore := models.NewResearchProjectStore(pool)
 	userStore := models.NewUserStore(pool)
 
 	// AI client
@@ -61,14 +62,15 @@ func main() {
 
 	// Create bot
 	bot, err := telegram.New(cfg.Telegram.BotToken, allowlist, telegram.BotDeps{
-		Articles:      articleStore,
-		Briefs:        briefStore,
-		WatchlistHits: watchlistHitStore,
-		WatchlistOrgs: watchlistOrgStore,
-		TelegramUsers: telegramUserStore,
-		Notifications: notificationStore,
-		AI:            aiClient,
-		Users:         userStore,
+		Articles:         articleStore,
+		Briefs:           briefStore,
+		WatchlistHits:    watchlistHitStore,
+		WatchlistOrgs:    watchlistOrgStore,
+		TelegramUsers:    telegramUserStore,
+		Notifications:    notificationStore,
+		ResearchProjects: researchProjectStore,
+		AI:               aiClient,
+		Users:            userStore,
 	})
 	if err != nil {
 		slog.Error("failed to create bot", "err", err)
