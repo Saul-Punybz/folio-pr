@@ -115,12 +115,18 @@ func main() {
 	os.Setenv("DB_SSLMODE", "disable")
 	cfg := config.Load()
 
-	// ── Check Ollama ─────────────────────────────────────────────
-	ollamaAvailable := checkOllama(cfg.Ollama.Host)
-	if !ollamaAvailable {
-		slog.Warn("Ollama not available — AI features disabled",
-			"host", cfg.Ollama.Host,
-			"fix", "Install Ollama: brew install ollama && ollama serve")
+	// ── Check AI Provider ─────────────────────────────────────────
+	if cfg.AI.Provider == "openai" {
+		slog.Info("AI provider: OpenAI-compatible API",
+			"host", cfg.AI.Host,
+			"model", cfg.AI.InstructModel)
+	} else {
+		ollamaAvailable := checkOllama(cfg.AI.Host)
+		if !ollamaAvailable {
+			slog.Warn("Ollama not available — AI features disabled",
+				"host", cfg.AI.Host,
+				"fix", "Install Ollama: brew install ollama && ollama serve")
+		}
 	}
 
 	// ── Create Stores ────────────────────────────────────────────
@@ -156,8 +162,8 @@ func main() {
 		storageClient = nil
 	}
 
-	// AI client.
-	aiClient := ai.NewClient(cfg.Ollama.Host, cfg.Ollama.InstructModel, cfg.Ollama.EmbedModel)
+	// AI client — supports both Ollama (local) and OpenAI-compatible APIs (cloud).
+	aiClient := ai.NewFromConfig(cfg.AI.Provider, cfg.AI.Host, cfg.AI.APIKey, cfg.AI.InstructModel, cfg.AI.EmbedModel)
 
 	// ── Setup Router (same as cmd/api) ───────────────────────────
 	r := setupRouter(

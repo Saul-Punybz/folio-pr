@@ -13,23 +13,28 @@ import (
 )
 
 const (
-	generateTimeout  = 60 * time.Second
+	generateTimeout  = 120 * time.Second
 	embeddingTimeout = 30 * time.Second
 )
 
-// OllamaClient is an HTTP client for the Ollama API.
+// OllamaClient is an HTTP client that supports both the Ollama API and
+// OpenAI-compatible APIs (OpenAI, Groq, Together, OpenRouter, etc.).
+//
+// Set AI_PROVIDER=openai and AI_API_KEY=... to use cloud providers.
 type OllamaClient struct {
 	baseURL       string
+	apiKey        string // for OpenAI-compatible providers
+	protocol      string // "ollama" or "openai"
 	instructModel string
 	embedModel    string
 	httpClient    *http.Client
 }
 
-// NewClient creates a new OllamaClient configured with the given base URL and
-// model names.
+// NewClient creates a new AI client with the Ollama protocol.
 func NewClient(baseURL, instructModel, embedModel string) *OllamaClient {
 	return &OllamaClient{
 		baseURL:       strings.TrimRight(baseURL, "/"),
+		protocol:      "ollama",
 		instructModel: instructModel,
 		embedModel:    embedModel,
 		httpClient: &http.Client{
@@ -38,7 +43,40 @@ func NewClient(baseURL, instructModel, embedModel string) *OllamaClient {
 	}
 }
 
-// generateRequest is the JSON body sent to POST /api/generate.
+// NewFromConfig creates the appropriate AI client based on the provider string.
+// provider="ollama" uses Ollama, provider="openai" uses OpenAI-compatible API.
+func NewFromConfig(provider, host, apiKey, instructModel, embedModel string) *OllamaClient {
+	if provider == "openai" {
+		return NewOpenAIClient(host, apiKey, instructModel, embedModel)
+	}
+	return NewClient(host, instructModel, embedModel)
+}
+
+// NewOpenAIClient creates a new AI client using the OpenAI-compatible API.
+// Works with: OpenAI, Groq, Together, OpenRouter, Mistral, any OpenAI-compatible provider.
+//
+// Example base URLs:
+//
+//	OpenAI:      https://api.openai.com
+//	Groq:        https://api.groq.com/openai
+//	Together:    https://api.together.xyz
+//	OpenRouter:  https://openrouter.ai/api
+//	Mistral:     https://api.mistral.ai
+func NewOpenAIClient(baseURL, apiKey, instructModel, embedModel string) *OllamaClient {
+	return &OllamaClient{
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		apiKey:        apiKey,
+		protocol:      "openai",
+		instructModel: instructModel,
+		embedModel:    embedModel,
+		httpClient: &http.Client{
+			Timeout: generateTimeout,
+		},
+	}
+}
+
+// ── Ollama protocol types ────────────────────────────────────
+
 type generateRequest struct {
 	Model  string `json:"model"`
 	System string `json:"system,omitempty"`
@@ -46,24 +84,55 @@ type generateRequest struct {
 	Stream bool   `json:"stream"`
 }
 
-// generateResponse is a single JSON object in the Ollama streaming response.
-// When stream=false, there is one response with done=true containing the full
-// response. When stream=true, each line is a JSON object with a partial
-// "response" field.
 type generateResponse struct {
 	Response string `json:"response"`
 	Done     bool   `json:"done"`
 }
 
-// embeddingRequest is the JSON body sent to POST /api/embeddings.
 type embeddingRequest struct {
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
 }
 
-// embeddingResponse is the JSON response from POST /api/embeddings.
 type embeddingResponse struct {
 	Embedding []float32 `json:"embedding"`
+}
+
+// ── OpenAI protocol types ────────────────────────────────────
+
+type openaiMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type openaiChatRequest struct {
+	Model    string          `json:"model"`
+	Messages []openaiMessage `json:"messages"`
+}
+
+type openaiChatResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+type openaiEmbedRequest struct {
+	Model string `json:"model"`
+	Input string `json:"input"`
+}
+
+type openaiEmbedResponse struct {
+	Data []struct {
+		Embedding []float32 `json:"embedding"`
+	} `json:"data"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
 }
 
 // Summarize asks the LLM to produce a 2-3 sentence summary of the given text.
@@ -202,9 +271,15 @@ RULES:
 	}
 }
 
-// Embed generates a vector embedding for the given text using the embedding
-// model.
+// Embed generates a vector embedding for the given text using the embedding model.
 func (c *OllamaClient) Embed(ctx context.Context, text string) ([]float32, error) {
+	if c.protocol == "openai" {
+		return c.embedOpenAI(ctx, text)
+	}
+	return c.embedOllama(ctx, text)
+}
+
+func (c *OllamaClient) embedOllama(ctx context.Context, text string) ([]float32, error) {
 	ctx, cancel := context.WithTimeout(ctx, embeddingTimeout)
 	defer cancel()
 
@@ -215,36 +290,84 @@ func (c *OllamaClient) Embed(ctx context.Context, text string) ([]float32, error
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("ollama embed: marshal request: %w", err)
+		return nil, fmt.Errorf("embed: marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/embeddings", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("ollama embed: create request: %w", err)
+		return nil, fmt.Errorf("embed: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ollama embed: request: %w", err)
+		return nil, fmt.Errorf("embed: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("ollama embed: status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("embed: status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result embeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("ollama embed: decode response: %w", err)
+		return nil, fmt.Errorf("embed: decode response: %w", err)
 	}
 
 	if len(result.Embedding) == 0 {
-		return nil, fmt.Errorf("ollama embed: empty embedding returned")
+		return nil, fmt.Errorf("embed: empty embedding returned")
 	}
 
 	return result.Embedding, nil
+}
+
+func (c *OllamaClient) embedOpenAI(ctx context.Context, text string) ([]float32, error) {
+	ctx, cancel := context.WithTimeout(ctx, embeddingTimeout)
+	defer cancel()
+
+	reqBody := openaiEmbedRequest{
+		Model: c.embedModel,
+		Input: text,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("embed: marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("embed: create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("embed: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("embed: status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result openaiEmbedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("embed: decode response: %w", err)
+	}
+
+	if result.Error != nil {
+		return nil, fmt.Errorf("embed: API error: %s", result.Error.Message)
+	}
+
+	if len(result.Data) == 0 || len(result.Data[0].Embedding) == 0 {
+		return nil, fmt.Errorf("embed: empty embedding returned")
+	}
+
+	return result.Data[0].Embedding, nil
 }
 
 // Generate performs an LLM generation with a custom system prompt and user prompt.
@@ -259,14 +382,22 @@ func (c *OllamaClient) GenerateWithModel(ctx context.Context, model, systemPromp
 	return c.generateWithModel(ctx, model, systemPrompt, userPrompt)
 }
 
-// generate performs a POST to /api/generate using the default instructModel.
+// generate performs text generation using the default instructModel.
 func (c *OllamaClient) generate(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	return c.generateWithModel(ctx, c.instructModel, systemPrompt, userPrompt)
 }
 
-// generateWithModel performs a POST to /api/generate with a specific model and
-// concatenates the streamed response into a single string.
+// generateWithModel performs text generation with a specific model.
+// Routes to either Ollama or OpenAI protocol based on client configuration.
 func (c *OllamaClient) generateWithModel(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
+	if c.protocol == "openai" {
+		return c.generateOpenAI(ctx, model, systemPrompt, userPrompt)
+	}
+	return c.generateOllama(ctx, model, systemPrompt, userPrompt)
+}
+
+// generateOllama uses the native Ollama API (POST /api/generate).
+func (c *OllamaClient) generateOllama(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, generateTimeout)
 	defer cancel()
 
@@ -279,38 +410,35 @@ func (c *OllamaClient) generateWithModel(ctx context.Context, model, systemPromp
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("ollama generate: marshal request: %w", err)
+		return "", fmt.Errorf("generate: marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("ollama generate: create request: %w", err)
+		return "", fmt.Errorf("generate: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ollama generate: request: %w", err)
+		return "", fmt.Errorf("generate: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("ollama generate: status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("generate: status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Ollama streams JSON objects, one per line. Concatenate the "response"
-	// fields to build the full response.
 	var sb strings.Builder
 	decoder := json.NewDecoder(resp.Body)
 	for decoder.More() {
 		var chunk generateResponse
 		if err := decoder.Decode(&chunk); err != nil {
-			// If we already have some content, return what we have.
 			if sb.Len() > 0 {
 				break
 			}
-			return "", fmt.Errorf("ollama generate: decode chunk: %w", err)
+			return "", fmt.Errorf("generate: decode chunk: %w", err)
 		}
 		sb.WriteString(chunk.Response)
 		if chunk.Done {
@@ -320,10 +448,72 @@ func (c *OllamaClient) generateWithModel(ctx context.Context, model, systemPromp
 
 	result := strings.TrimSpace(sb.String())
 	if result == "" {
-		return "", fmt.Errorf("ollama generate: empty response")
+		return "", fmt.Errorf("generate: empty response")
 	}
 
 	return result, nil
+}
+
+// generateOpenAI uses the OpenAI chat completions API (POST /v1/chat/completions).
+// Works with OpenAI, Groq, Together, OpenRouter, Mistral, and any compatible provider.
+func (c *OllamaClient) generateOpenAI(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, generateTimeout)
+	defer cancel()
+
+	messages := []openaiMessage{
+		{Role: "user", Content: userPrompt},
+	}
+	if systemPrompt != "" {
+		messages = append([]openaiMessage{{Role: "system", Content: systemPrompt}}, messages...)
+	}
+
+	reqBody := openaiChatRequest{
+		Model:    model,
+		Messages: messages,
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("generate: marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("generate: create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("generate: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("generate: status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result openaiChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("generate: decode response: %w", err)
+	}
+
+	if result.Error != nil {
+		return "", fmt.Errorf("generate: API error: %s", result.Error.Message)
+	}
+
+	if len(result.Choices) == 0 {
+		return "", fmt.Errorf("generate: empty response (no choices)")
+	}
+
+	text := strings.TrimSpace(result.Choices[0].Message.Content)
+	if text == "" {
+		return "", fmt.Errorf("generate: empty response")
+	}
+
+	return text, nil
 }
 
 // allowedTags is the set of valid topic tags for classification.

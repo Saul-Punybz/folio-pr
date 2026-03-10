@@ -13,6 +13,7 @@ type Config struct {
 	Server   ServerConfig
 	S3       S3Config
 	Ollama   OllamaConfig
+	AI       AIConfig
 	Telegram TelegramConfig
 }
 
@@ -53,11 +54,33 @@ type S3Config struct {
 	Region    string
 }
 
-// OllamaConfig holds the Ollama LLM server parameters.
+// OllamaConfig holds the Ollama LLM server parameters (legacy, still works).
 type OllamaConfig struct {
 	Host          string
 	InstructModel string
 	EmbedModel    string
+}
+
+// AIConfig holds the unified AI provider configuration.
+// Supports both Ollama (local) and OpenAI-compatible APIs (cloud).
+//
+// Provider "ollama" (default): Uses Ollama at AI_HOST with any model.
+//
+//	Models: llama3.2:3b, mistral, gemma2, qwen2.5, phi4, deepseek-r1:8b, etc.
+//
+// Provider "openai": Uses OpenAI-compatible API. Works with:
+//
+//	OpenAI:      AI_HOST=https://api.openai.com          AI_MODEL=gpt-4o-mini
+//	Groq:        AI_HOST=https://api.groq.com/openai     AI_MODEL=llama-3.3-70b-versatile
+//	Together:    AI_HOST=https://api.together.xyz         AI_MODEL=meta-llama/Llama-3-70b-chat-hf
+//	OpenRouter:  AI_HOST=https://openrouter.ai/api       AI_MODEL=anthropic/claude-sonnet-4-5-20250929
+//	Mistral:     AI_HOST=https://api.mistral.ai          AI_MODEL=mistral-small-latest
+type AIConfig struct {
+	Provider      string // "ollama" or "openai"
+	Host          string // API base URL
+	APIKey        string // API key (for cloud providers)
+	InstructModel string // model for text generation
+	EmbedModel    string // model for embeddings
 }
 
 // TelegramConfig holds Telegram bot parameters.
@@ -113,6 +136,13 @@ func Load() Config {
 			Host:          envOr("OLLAMA_HOST", "http://localhost:11434"),
 			InstructModel: envOr("OLLAMA_INSTRUCT_MODEL", "llama3.2:3b"),
 			EmbedModel:    envOr("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
+		},
+		AI: AIConfig{
+			Provider:      envOr("AI_PROVIDER", "ollama"),
+			Host:          envOr("AI_HOST", envOr("OLLAMA_HOST", "http://localhost:11434")),
+			APIKey:        envOr("AI_API_KEY", ""),
+			InstructModel: envOr("AI_MODEL", envOr("OLLAMA_INSTRUCT_MODEL", "llama3.2:3b")),
+			EmbedModel:    envOr("AI_EMBED_MODEL", envOr("OLLAMA_EMBED_MODEL", "nomic-embed-text")),
 		},
 		Telegram: TelegramConfig{
 			BotToken:  envOr("TELEGRAM_BOT_TOKEN", ""),
