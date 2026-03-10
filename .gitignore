@@ -51,3 +51,6 @@ coverage.html
 /tmp/
 /bin/
 /dist/
+/build/
+/bot
+/app

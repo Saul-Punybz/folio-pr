@@ -4,6 +4,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,8 +16,66 @@ import (
 	"github.com/Saul-Punybz/folio/internal/config"
 )
 
-// Connect creates a pgxpool connection pool and runs pending migrations.
+// Connect creates a pgxpool connection pool and runs pending migrations
+// from the filesystem (migrations/ directory).
 func Connect(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
+	pool, err := connectPool(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := runMigrationsFromDir(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db: migrations: %w", err)
+	}
+
+	return pool, nil
+}
+
+// ConnectWithFS creates a pgxpool connection pool and runs pending migrations
+// from an embedded filesystem. Used by the macOS .app bundle.
+func ConnectWithFS(ctx context.Context, cfg config.DBConfig, migrationsFS fs.FS) (*pgxpool.Pool, error) {
+	pool, err := connectPool(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := runMigrationsFromFS(ctx, pool, migrationsFS); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db: migrations: %w", err)
+	}
+
+	return pool, nil
+}
+
+// ConnectWithDSN creates a pool using a raw DSN string (for embedded PG).
+func ConnectWithDSN(ctx context.Context, dsn string, migrationsFS fs.FS) (*pgxpool.Pool, error) {
+	poolCfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("db: parse config: %w", err)
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("db: connect: %w", err)
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db: ping: %w", err)
+	}
+
+	slog.Info("database connected", "dsn", dsn[:strings.Index(dsn, "@")+1]+"...")
+
+	if err := runMigrationsFromFS(ctx, pool, migrationsFS); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db: migrations: %w", err)
+	}
+
+	return pool, nil
+}
+
+func connectPool(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.DSN())
 	if err != nil {
 		return nil, fmt.Errorf("db: parse config: %w", err)
@@ -33,20 +92,11 @@ func Connect(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
 	}
 
 	slog.Info("database connected", "host", cfg.Host, "port", cfg.Port, "db", cfg.DBName)
-
-	if err := runMigrations(ctx, pool); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("db: migrations: %w", err)
-	}
-
 	return pool, nil
 }
 
-// runMigrations reads SQL files from the migrations/ directory and executes
-// them in sorted order. It uses a simple migrations tracking table to avoid
-// re-running migrations.
-func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	// Create the tracking table if it doesn't exist.
+// applyMigrations executes migration files against the pool.
+func applyMigrations(ctx context.Context, pool *pgxpool.Pool, files []string, readFile func(string) ([]byte, error)) error {
 	const createTracker = `
 		CREATE TABLE IF NOT EXISTS _migrations (
 			filename TEXT PRIMARY KEY,
@@ -56,11 +106,41 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("create tracker table: %w", err)
 	}
 
-	// Find migration files.
+	for _, f := range files {
+		var exists bool
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM _migrations WHERE filename = $1)", f).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("check migration %s: %w", f, err)
+		}
+		if exists {
+			continue
+		}
+
+		content, err := readFile(f)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", f, err)
+		}
+
+		slog.Info("applying migration", "file", f)
+
+		if _, err := pool.Exec(ctx, string(content)); err != nil {
+			return fmt.Errorf("exec migration %s: %w", f, err)
+		}
+
+		if _, err := pool.Exec(ctx, "INSERT INTO _migrations (filename) VALUES ($1)", f); err != nil {
+			return fmt.Errorf("record migration %s: %w", f, err)
+		}
+	}
+
+	slog.Info("migrations complete", "count", len(files))
+	return nil
+}
+
+// runMigrationsFromDir reads SQL files from the migrations/ directory.
+func runMigrationsFromDir(ctx context.Context, pool *pgxpool.Pool) error {
 	migrationsDir := "migrations"
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
-		// If the migrations directory doesn't exist, skip silently.
 		if os.IsNotExist(err) {
 			slog.Info("migrations directory not found, skipping")
 			return nil
@@ -76,35 +156,27 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	sort.Strings(files)
 
-	for _, f := range files {
-		// Check if already applied.
-		var exists bool
-		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM _migrations WHERE filename = $1)", f).Scan(&exists)
-		if err != nil {
-			return fmt.Errorf("check migration %s: %w", f, err)
-		}
-		if exists {
-			continue
-		}
+	return applyMigrations(ctx, pool, files, func(name string) ([]byte, error) {
+		return os.ReadFile(filepath.Join(migrationsDir, name))
+	})
+}
 
-		// Read and execute the migration.
-		content, err := os.ReadFile(filepath.Join(migrationsDir, f))
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", f, err)
-		}
-
-		slog.Info("applying migration", "file", f)
-
-		if _, err := pool.Exec(ctx, string(content)); err != nil {
-			return fmt.Errorf("exec migration %s: %w", f, err)
-		}
-
-		// Record it.
-		if _, err := pool.Exec(ctx, "INSERT INTO _migrations (filename) VALUES ($1)", f); err != nil {
-			return fmt.Errorf("record migration %s: %w", f, err)
-		}
+// runMigrationsFromFS reads SQL files from an embedded filesystem.
+func runMigrationsFromFS(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return fmt.Errorf("read embedded migrations: %w", err)
 	}
 
-	slog.Info("migrations complete", "count", len(files))
-	return nil
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
+		}
+	}
+	sort.Strings(files)
+
+	return applyMigrations(ctx, pool, files, func(name string) ([]byte, error) {
+		return fs.ReadFile(fsys, name)
+	})
 }
