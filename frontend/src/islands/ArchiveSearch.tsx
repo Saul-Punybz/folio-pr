@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type Article } from '../lib/api';
 import { regionColor, statusColor, isExpired, formatDate, debounce } from '../lib/utils';
+import { useNearEnd } from '../lib/useNearEnd';
 import { Icon, Spinner, EmptyState, tagLabel } from './ui';
 
 const TAG_OPTIONS = [
@@ -17,7 +18,7 @@ export default function ArchiveSearch() {
   const [hasSearched, setHasSearched] = useState(false);
   const [offset, setOffset] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
-  const limit = 25;
+  const limit = 30;
 
   // Filters
   const [dateFrom, setDateFrom] = useState('');
@@ -107,6 +108,7 @@ export default function ArchiveSearch() {
   };
 
   const hasMore = results.length < total;
+  const sentinelRef = useNearEnd(loadMore, hasMore && !loading && !loadingMore);
 
   const STATUS_LABELS: Record<string, string> = { saved: 'Guardada', trashed: 'Descartada', inbox: 'Inbox', archived: 'Archivada' };
   const hasFilters = !!(dateFrom || dateTo || regionFilter || statusFilter || tagFilter);
@@ -258,7 +260,7 @@ export default function ArchiveSearch() {
       )}
 
       {hasMore && !loading && (
-        <div className="flex justify-center pt-4">
+        <div ref={sentinelRef} className="flex justify-center pt-4">
           <button type="button" onClick={loadMore} disabled={loadingMore} className="btn btn-tonal">
             {loadingMore ? (<><Spinner className="w-5 h-5" />Cargando...</>) : `Ver más (${results.length} de ${total})`}
           </button>

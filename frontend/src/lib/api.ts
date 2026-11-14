@@ -37,7 +37,9 @@ export interface Source {
 
 export interface ItemsResponse {
   items: Article[];
-  total: number;
+  count?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface SearchResponse {
@@ -201,6 +203,9 @@ export interface OpportunityStatsResponse {
   by_status: Record<string, number>;
 }
 
+// Rutas públicas: un 401 aquí es un error normal, no una sesión vencida.
+const NO_REDIRECT = new Set(['/login', '/setup']);
+
 async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'same-origin',
@@ -211,7 +216,7 @@ async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T
     ...options,
   });
 
-  if (res.status === 401 && path !== '/login') {
+  if (res.status === 401 && !NO_REDIRECT.has(path)) {
     if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
       window.location.href = '/login';
     }
@@ -245,6 +250,12 @@ export const api = {
   login: (email: string, password: string): Promise<{ user: User }> =>
     fetchAPI('/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
 
+  setupStatus: (): Promise<{ needs_setup: boolean }> =>
+    fetchAPI('/setup'),
+
+  setup: (email: string, password: string): Promise<any> =>
+    fetchAPI('/setup', { method: 'POST', body: JSON.stringify({ email, password }) }),
+
   logout: (): Promise<{ status: string }> =>
     fetchAPI('/logout', { method: 'POST' }),
 
@@ -252,7 +263,7 @@ export const api = {
     fetchAPI('/me'),
 
   // Items
-  getItems: (status: string, limit = 200, offset = 0, date = ''): Promise<ItemsResponse> =>
+  getItems: (status: string, limit = 30, offset = 0, date = ''): Promise<ItemsResponse> =>
     fetchAPI(`/items?status=${status}&limit=${limit}&offset=${offset}${date ? `&date=${date}` : ''}`),
 
   saveItem: (id: string) =>

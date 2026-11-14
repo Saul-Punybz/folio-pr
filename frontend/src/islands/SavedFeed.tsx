@@ -1,8 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api, type Article } from '../lib/api';
 import { timeAgo, regionColor, formatDate } from '../lib/utils';
 import NotesPanel from './NotesPanel';
-import { Icon, EmptyState, tagLabel } from './ui';
+import { useNearEnd } from '../lib/useNearEnd';
+import { Icon, Spinner, EmptyState, tagLabel } from './ui';
+
+const PAGE = 30;
 
 function SkeletonCard() {
   return (
@@ -37,11 +40,34 @@ export default function SavedFeed() {
   const [filter, setFilter] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const countRef = useRef(0);
+  countRef.current = articles.length;
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await api.getItems('saved', PAGE, countRef.current);
+      const next = data.items || [];
+      setArticles((prev) => {
+        const seen = new Set(prev.map((a) => a.id));
+        return [...prev, ...next.filter((a) => !seen.has(a.id))];
+      });
+      setHasMore(next.length >= PAGE);
+    } catch { /* se queda el botón para reintentar */ } finally { setLoadingMore(false); }
+  }, [loadingMore, hasMore]);
+
+  const sentinelRef = useNearEnd(loadMore, hasMore && !loading && !loadingMore);
+
   const fetchItems = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.getItems('saved');
+      const data = await api.getItems('saved', PAGE, 0);
       setArticles(data.items || []);
+      setHasMore((data.items?.length ?? 0) >= PAGE);
+      setError('');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -185,6 +211,14 @@ export default function SavedFeed() {
           </button>
         ))}
       </div>
+
+      {hasMore && (
+        <div ref={sentinelRef} className="flex justify-center pt-2">
+          <button type="button" onClick={loadMore} disabled={loadingMore} className="btn btn-tonal">
+            {loadingMore ? (<><Spinner className="w-5 h-5" />Cargando...</>) : 'Ver más'}
+          </button>
+        </div>
+      )}
 
       {expandedArticle && (
         <>

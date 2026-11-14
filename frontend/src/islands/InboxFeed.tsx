@@ -4,6 +4,7 @@ import { api, type Article, type Source } from '../lib/api';
 import ArticleCard from './ArticleCard';
 import NotesPanel from './NotesPanel';
 import { formatDate } from '../lib/utils';
+import { useNearEnd } from '../lib/useNearEnd';
 import { Icon, Spinner, EmptyState, Modal, Notice, tagLabel } from './ui';
 
 const TAG_OPTIONS = [
@@ -13,6 +14,8 @@ const TAG_OPTIONS = [
   'small-business', 'nonprofit', 'entrepreneurship', 'tourism',
   'energy', 'agriculture', 'housing',
 ];
+
+const PAGE = 30;
 
 const REGION_OPTIONS = ['PR', 'US', 'Federal', 'Grants', 'Local'];
 
@@ -170,6 +173,13 @@ export default function InboxFeed() {
   const [showAddSource, setShowAddSource] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Siempre la lista vigente y el filtro de fecha, para pedir la siguiente página.
+  const articlesRef = useRef<Article[]>([]);
+  articlesRef.current = articles;
+  const dateRef = useRef('');
+  const gen = useRef(0);
 
   // Filters
   const [activeTag, setActiveTag] = useState('');
@@ -181,12 +191,39 @@ export default function InboxFeed() {
     try {
       setLoading(true);
       const d = date ?? dateFilter;
-      const data = await api.getItems('inbox', 200, 0, d);
+      dateRef.current = d;
+      const g = ++gen.current;
+      const data = await api.getItems('inbox', PAGE, 0, d);
+      if (g !== gen.current) return;
       setArticles(data.items || []);
-      const badge = document.getElementById('inbox-count');
-      if (badge) { badge.textContent = `${data.items?.length ?? 0} nuevos`; }
+      setHasMore((data.items?.length ?? 0) >= PAGE);
+      setError('');
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   }, [dateFilter]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const g = gen.current;
+    try {
+      // Lo guardado, descartado o deshecho ya cambió en el servidor: el offset es lo que tenemos en pantalla.
+      const data = await api.getItems('inbox', PAGE, articlesRef.current.length, dateRef.current);
+      if (g !== gen.current) return;
+      const next = data.items || [];
+      setArticles((prev) => {
+        const seen = new Set(prev.map((a) => a.id));
+        return [...prev, ...next.filter((a) => !seen.has(a.id))];
+      });
+      setHasMore(next.length >= PAGE);
+    } catch { /* se queda el botón para reintentar */ } finally { setLoadingMore(false); }
+  }, [loadingMore, hasMore]);
+
+  const sentinelRef = useNearEnd(loadMore, hasMore && !loading && !loadingMore);
+
+  useEffect(() => {
+    const badge = document.getElementById('inbox-count');
+    if (badge) badge.textContent = `${articles.length}${hasMore ? '+' : ''} nuevos`;
+  }, [articles.length, hasMore]);
 
   const fetchSources = useCallback(async () => {
     try { setSources(await api.getSources()); } catch {}
@@ -401,6 +438,14 @@ export default function InboxFeed() {
           </div>
         ))}
       </div>
+
+      {hasMore && (
+        <div ref={sentinelRef} className="flex justify-center pt-6 pb-2">
+          <button type="button" onClick={loadMore} disabled={loadingMore} className="btn btn-tonal">
+            {loadingMore ? (<><Spinner className="w-5 h-5" />Cargando...</>) : 'Ver más'}
+          </button>
+        </div>
+      )}
 
       {fab}
 
