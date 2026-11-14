@@ -1,6 +1,6 @@
 module github.com/Saul-Punybz/folio
 
-go 1.22.0
+go 1.24.1
 
 toolchain go1.26.0
 
@@ -12,6 +12,7 @@ require (
 	github.com/gocolly/colly/v2 v2.1.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/crypto v0.33.0
 	golang.org/x/term v0.29.0
