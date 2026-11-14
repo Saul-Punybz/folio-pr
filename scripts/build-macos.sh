@@ -1,297 +1,163 @@
 #!/bin/bash
+# Arma build/Folio.app (Apple Silicon) y build/Folio.zip.
+#
+# La app no depende de nada instalado en la Mac de destino: lleva dentro el
+# binario de Folio (frontend + migraciones embebidos) y un Postgres 18
+# relocalizable (binarios de zonky/EDB, solo @loader_path y /usr/lib|/System).
+#
+# Uso:   bash scripts/build-macos.sh        (o: make mac)
+#
+# Variables opcionales:
+#   FOLIO_OUT=dir              carpeta de salida (por defecto build/)
+#   FOLIO_SIGN_IDENTITY="Developer ID Application: …"   firmar con Developer ID
+#   FOLIO_NOTARY_PROFILE=perfil  notarizar (xcrun notarytool store-credentials)
+# Sin FOLIO_SIGN_IDENTITY se firma ad-hoc (Gatekeeper pedirá "Abrir igualmente").
+#
+# Requisitos de la máquina que compila: Go, curl, (npm solo si falta frontend/dist).
 set -euo pipefail
-
-# Build Folio.app — Self-contained macOS application
-# Bundles: Go binary (with embedded frontend+migrations) + PostgreSQL + pgvector
-#
-# Requirements (build machine only):
-#   brew install postgresql@17 pgvector node
-#
-# Usage:
-#   bash scripts/build-macos.sh
-#
-# Output:
-#   build/Folio.dmg
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_DIR/build"
-APP_DIR="$BUILD_DIR/Folio.app"
-CONTENTS="$APP_DIR/Contents"
-MACOS="$CONTENTS/MacOS"
-RESOURCES="$CONTENTS/Resources"
-PG_BUNDLE="$RESOURCES/pg"
+OUT_DIR="${FOLIO_OUT:-$PROJECT_DIR/build}"
+CACHE_DIR="$PROJECT_DIR/build/pg-cache"
+STAGE="$OUT_DIR/.staging"
+APP="$STAGE/Folio.app"
+CONTENTS="$APP/Contents"
+PG="$CONTENTS/Resources/pg"
 
-echo "╔══════════════════════════════════════╗"
-echo "║     Building Folio.app for macOS     ║"
-echo "╚══════════════════════════════════════╝"
+# ── Postgres empaquetado (versiones y sumas fijas) ────────────────────
+PG_VERSION="18.3.0"
+ZONKY_JAR="embedded-postgres-binaries-darwin-arm64v8-$PG_VERSION.jar"
+ZONKY_URL="https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-darwin-arm64v8/$PG_VERSION/$ZONKY_JAR"
+ZONKY_SHA="a18ec9ec6a905e04f5a08a8f7870bddadd635feb54dee332a3daf80fada3cb1a"
+# zonky solo trae initdb/pg_ctl/postgres; pg_dump (respaldos) sale del mismo
+# build de EDB del que zonky saca los suyos (mismas libs, misma firma EDB).
+EDB_ZIP="edb.zip"
+EDB_URL="https://get.enterprisedb.com/postgresql/postgresql-18.3-1-osx-binaries.zip"
+EDB_SHA="15ee2a45489eba14f8c7376b05f3df3892c07f36d6f8d344ec2a422df97a5e27"
 
-# Clean previous build
-rm -rf "$BUILD_DIR"
-mkdir -p "$MACOS" "$RESOURCES" "$PG_BUNDLE"/{bin,lib,share}
+APP_VERSION="${FOLIO_VERSION:-2.0.0}"
 
-# ── Step 1: Build Frontend ────────────────────────────────────
-echo ""
-echo "▸ Step 1/5: Building frontend..."
-cd "$PROJECT_DIR/frontend"
-npm run build --silent 2>&1
-cd "$PROJECT_DIR"
-echo "  ✓ Frontend built"
+step() { echo ""; echo "▸ $*"; }
 
-# ── Step 2: Build Go Binary ──────────────────────────────────
-echo ""
-echo "▸ Step 2/5: Building Go binary (arm64)..."
-CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build \
-    -ldflags="-s -w" \
-    -tags "desktop,production" \
-    -o "$MACOS/Folio" \
-    ./cmd/app
-echo "  ✓ Binary built ($(du -h "$MACOS/Folio" | awk '{print $1}'))"
-
-# ── Step 3: Bundle PostgreSQL ────────────────────────────────
-echo ""
-echo "▸ Step 3/5: Bundling PostgreSQL..."
-
-# Find PostgreSQL from Homebrew
-PG_PREFIX=""
-for ver in 17 16 15; do
-    candidate="/opt/homebrew/opt/postgresql@${ver}"
-    if [ -d "$candidate" ]; then
-        PG_PREFIX="$candidate"
-        echo "  Found PostgreSQL @${ver} at $PG_PREFIX"
-        break
+fetch() { # fetch <url> <archivo> <sha256>
+    local url="$1" file="$CACHE_DIR/$2" sha="$3"
+    if [ ! -f "$file" ] || [ "$(shasum -a 256 "$file" | awk '{print $1}')" != "$sha" ]; then
+        echo "  descargando $(basename "$file")…"
+        curl -fL --retry 3 -o "$file.part" "$url"
+        mv "$file.part" "$file"
     fi
-    candidate="/usr/local/opt/postgresql@${ver}"
-    if [ -d "$candidate" ]; then
-        PG_PREFIX="$candidate"
-        echo "  Found PostgreSQL @${ver} at $PG_PREFIX"
-        break
+    local got
+    got="$(shasum -a 256 "$file" | awk '{print $1}')"
+    if [ "$got" != "$sha" ]; then
+        echo "  ✗ suma SHA-256 no coincide para $file ($got)"; exit 1
     fi
-done
+}
 
-if [ -z "$PG_PREFIX" ]; then
-    echo "  ✗ PostgreSQL not found! Install with: brew install postgresql@17"
-    exit 1
-fi
+rm -rf "$STAGE"
+mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$PG" "$CACHE_DIR"
 
-# Copy essential PG binaries
-for bin in postgres initdb pg_ctl pg_isready createdb psql; do
-    if [ -f "$PG_PREFIX/bin/$bin" ]; then
-        cp "$PG_PREFIX/bin/$bin" "$PG_BUNDLE/bin/"
-    fi
-done
-
-# Copy PG libraries
-cp "$PG_PREFIX/lib/"*.dylib "$PG_BUNDLE/lib/" 2>/dev/null || true
-if [ -d "$PG_PREFIX/lib/postgresql" ]; then
-    cp -R "$PG_PREFIX/lib/postgresql" "$PG_BUNDLE/lib/"
-fi
-
-# Copy ICU data dylibs. PostgreSQL's ICU libs reference these via @loader_path,
-# so they won't appear in the absolute-path dependency scan below.
-for icu_lib in /opt/homebrew/opt/icu4c@*/lib/libicudata*.dylib /usr/local/opt/icu4c@*/lib/libicudata*.dylib; do
-    if [ -f "$icu_lib" ]; then
-        cp -L "$icu_lib" "$PG_BUNDLE/lib/" 2>/dev/null || true
-    fi
-done
-
-# Copy PG share data (needed by initdb)
-PG_SHARE=""
-for d in "$PG_PREFIX/share/postgresql@"* "$PG_PREFIX/share/postgresql" "$PG_PREFIX/share"; do
-    if [ -d "$d" ] && [ -f "$d/postgres.bki" ] 2>/dev/null || [ -d "$d/timezone" ] 2>/dev/null; then
-        PG_SHARE="$d"
-        break
-    fi
-done
-if [ -n "$PG_SHARE" ]; then
-    cp -R "$PG_SHARE" "$PG_BUNDLE/share/postgresql"
+# ── 1. Frontend ───────────────────────────────────────────────────────
+step "1/6 Frontend"
+if [ -f "$PROJECT_DIR/frontend/dist/index.html" ] || [ -d "$PROJECT_DIR/frontend/dist/inbox" ]; then
+    echo "  usando frontend/dist existente"
 else
-    # Try the versioned share
-    PG_VER=$(basename "$PG_PREFIX" | sed 's/postgresql@//')
-    if [ -d "$PG_PREFIX/share/postgresql@${PG_VER}" ]; then
-        cp -R "$PG_PREFIX/share/postgresql@${PG_VER}" "$PG_BUNDLE/share/postgresql"
-    fi
+    (cd "$PROJECT_DIR/frontend" && npm install --silent && npm run build --silent)
 fi
 
-# Copy pgvector extension if available
-PGVECTOR_LIB=$(find /opt/homebrew /usr/local -name "vector.dylib" -path "*/postgresql*" 2>/dev/null | head -1)
-if [ -n "$PGVECTOR_LIB" ]; then
-    mkdir -p "$PG_BUNDLE/lib/postgresql/"
-    cp "$PGVECTOR_LIB" "$PG_BUNDLE/lib/postgresql/"
-    echo "  ✓ pgvector bundled"
+# ── 2. Binario Go ─────────────────────────────────────────────────────
+step "2/6 Binario (darwin/arm64)"
+(cd "$PROJECT_DIR" && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build \
+    -trimpath -ldflags="-s -w" -o "$CONTENTS/MacOS/Folio" ./cmd/folio)
+echo "  ✓ $(du -h "$CONTENTS/MacOS/Folio" | awk '{print $1}')"
+
+# ── 3. Postgres ───────────────────────────────────────────────────────
+step "3/6 Postgres $PG_VERSION"
+fetch "$ZONKY_URL" "$ZONKY_JAR" "$ZONKY_SHA"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+unzip -q -o "$CACHE_DIR/$ZONKY_JAR" 'postgres-darwin-arm_64.txz' -d "$TMP"
+tar -xJf "$TMP/postgres-darwin-arm_64.txz" -C "$PG"
+
+if [ ! -f "$CACHE_DIR/pg_dump-$PG_VERSION" ]; then
+    fetch "$EDB_URL" "$EDB_ZIP" "$EDB_SHA"
+    unzip -q -o "$CACHE_DIR/$EDB_ZIP" 'pgsql/bin/pg_dump' -d "$TMP"
+    cp "$TMP/pgsql/bin/pg_dump" "$CACHE_DIR/pg_dump-$PG_VERSION"
 fi
+install -m 755 "$CACHE_DIR/pg_dump-$PG_VERSION" "$PG/bin/pg_dump"
 
-# Copy pgvector SQL files
-PGVECTOR_SQL_DIR=$(dirname "$PGVECTOR_LIB" 2>/dev/null)/../share/*/extension 2>/dev/null
-for ext_dir in /opt/homebrew/share/postgresql@*/extension /usr/local/share/postgresql@*/extension; do
-    if [ -d "$ext_dir" ]; then
-        mkdir -p "$PG_BUNDLE/share/postgresql/extension/"
-        cp "$ext_dir"/vector* "$PG_BUNDLE/share/postgresql/extension/" 2>/dev/null || true
-        break
+# Solo arm64: quita la mitad x86_64 de los binarios universales.
+while IFS= read -r -d '' f; do
+    if lipo -archs "$f" 2>/dev/null | grep -q x86_64; then
+        lipo -thin arm64 "$f" -output "$f.thin" && mv "$f.thin" "$f"
     fi
-done
+done < <(find "$PG" -type f \( -perm +111 -o -name '*.dylib' -o -name '*.so' \) -print0)
 
-echo "  ✓ PostgreSQL bundled"
+# Ninguna referencia a Homebrew ni /usr/local.
+if find "$PG" "$CONTENTS/MacOS" -type f \( -perm +111 -o -name '*.dylib' -o -name '*.so' \) \
+        -exec otool -L {} \; 2>/dev/null | grep -qE "/opt/homebrew|/usr/local"; then
+    echo "  ✗ hay binarios que apuntan a /opt/homebrew o /usr/local"; exit 1
+fi
+echo "  ✓ $(du -sh "$PG" | awk '{print $1}'), sin rutas de Homebrew"
 
-# ── Step 4: Fix Dynamic Library Paths ────────────────────────
-echo ""
-echo "▸ Step 4/5: Fixing library paths..."
-
-# Collect all Homebrew dependencies
-collect_deps() {
-    local binary="$1"
-    otool -L "$binary" 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -E '^(/opt/homebrew|/usr/local).+\.dylib$' || true
-}
-
-# Copy all dependency dylibs and fix references
-fix_binary() {
-    local binary="$1"
-    local lib_dest="$PG_BUNDLE/lib"
-    local loader_ref="@loader_path/../lib"
-
-    if [ "$(dirname "$binary")" = "$lib_dest" ]; then
-        loader_ref="@loader_path"
-    fi
-
-    for dep in $(collect_deps "$binary"); do
-        local dep_name=$(basename "$dep")
-        local dep_target="$lib_dest/$dep_name"
-        local dep_ref="$loader_ref/$dep_name"
-        if [ ! -f "$dep_target" ]; then
-            cp -L "$dep" "$dep_target" 2>/dev/null || true
-            chmod 755 "$dep_target" 2>/dev/null || true
-            install_name_tool -id "@loader_path/$dep_name" "$dep_target" 2>/dev/null || true
-            # Rewrite the parent reference before recursing so nested calls can't
-            # contaminate the current dependency target via bash's dynamic scope.
-            install_name_tool -change "$dep" "$dep_ref" "$binary" 2>/dev/null || true
-            # Recursively fix this library's deps too
-            fix_binary "$dep_target"
-            continue
-        fi
-        # Use @loader_path so PG binaries resolve libs relative to themselves
-        install_name_tool -change "$dep" "$dep_ref" "$binary" 2>/dev/null || true
-    done
-
-    # Set the rpath
-    install_name_tool -add_rpath "@loader_path/../lib" "$binary" 2>/dev/null || true
-}
-
-# Fix all PG binaries
-for bin in "$PG_BUNDLE"/bin/*; do
-    fix_binary "$bin"
-done
-
-# Fix all dylibs
-for lib in "$PG_BUNDLE"/lib/*.dylib; do
-    fix_binary "$lib"
-done
-
-# Fix dylibs in postgresql subdir
-for lib in "$PG_BUNDLE"/lib/postgresql/*.dylib "$PG_BUNDLE"/lib/postgresql/*.so; do
-    [ -f "$lib" ] && fix_binary "$lib"
-done
-
-echo "  ✓ Library paths fixed"
-
-# Ad-hoc codesign all bundled binaries and libraries
-echo "  Signing bundled binaries..."
-for bin in "$PG_BUNDLE"/bin/*; do
-    codesign --force -s - "$bin" 2>/dev/null || true
-done
-for lib in "$PG_BUNDLE"/lib/*.dylib "$PG_BUNDLE"/lib/postgresql/*.dylib; do
-    [ -f "$lib" ] && codesign --force -s - "$lib" 2>/dev/null || true
-done
-echo "  ✓ Binaries signed"
-
-# ── Step 5: Create .app Bundle Metadata ──────────────────────
-echo ""
-echo "▸ Step 5/5: Creating app bundle..."
-
-# Info.plist
-cat > "$CONTENTS/Info.plist" << 'PLIST'
+# ── 4. Info.plist e ícono ─────────────────────────────────────────────
+step "4/6 Info.plist"
+cp "$SCRIPT_DIR/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
+cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    <key>CFBundleExecutable</key>
-    <string>Folio</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundleIdentifier</key>
-    <string>bz.puny.folio</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>Folio</string>
-    <key>CFBundleDisplayName</key>
-    <string>Folio</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSArchitecturePriority</key>
-    <array>
-        <string>arm64</string>
-    </array>
-    <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 Puny.bz. All rights reserved.</string>
+    <key>CFBundleName</key>                 <string>Folio</string>
+    <key>CFBundleDisplayName</key>          <string>Folio</string>
+    <key>CFBundleIdentifier</key>           <string>pr.folio.app</string>
+    <key>CFBundleExecutable</key>           <string>Folio</string>
+    <key>CFBundleIconFile</key>             <string>AppIcon</string>
+    <key>CFBundlePackageType</key>          <string>APPL</string>
+    <key>CFBundleVersion</key>              <string>$APP_VERSION</string>
+    <key>CFBundleShortVersionString</key>   <string>$APP_VERSION</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>LSMinimumSystemVersion</key>       <string>13.0</string>
+    <key>LSArchitecturePriority</key>       <array><string>arm64</string></array>
+    <key>NSHighResolutionCapable</key>      <true/>
 </dict>
 </plist>
 PLIST
+printf 'APPL????' > "$CONTENTS/PkgInfo"
 
-# Copy app icon
-ICON_SRC="$SCRIPT_DIR/AppIcon.icns"
-if [ -f "$ICON_SRC" ]; then
-    cp "$ICON_SRC" "$RESOURCES/AppIcon.icns"
-    echo "  ✓ App icon copied"
+# ── 5. Firma (de adentro hacia afuera) ────────────────────────────────
+step "5/6 Firma"
+xattr -cr "$APP"
+if [ -n "${FOLIO_SIGN_IDENTITY:-}" ]; then
+    SIGN=(--force --timestamp --options runtime -s "$FOLIO_SIGN_IDENTITY")
+    echo "  Developer ID: $FOLIO_SIGN_IDENTITY"
 else
-    echo "  (No AppIcon.icns found, skipping)"
+    SIGN=(--force -s -)
+    echo "  ad-hoc (sin FOLIO_SIGN_IDENTITY)"
+fi
+# Librerías primero, luego ejecutables de Postgres, luego Folio, luego el bundle.
+find "$PG" -type f \( -name '*.dylib' -o -name '*.so' \) -print0 | xargs -0 codesign "${SIGN[@]}"
+find "$PG/bin" -type f -perm +111 -print0 | xargs -0 codesign "${SIGN[@]}"
+codesign "${SIGN[@]}" "$CONTENTS/MacOS/Folio"
+codesign "${SIGN[@]}" --deep "$APP"
+codesign --verify --deep --strict "$APP"
+echo "  ✓ firma verificada"
+
+# ── 6. Salida: Folio.app + Folio.zip ──────────────────────────────────
+step "6/6 Folio.app y Folio.zip"
+rm -rf "$OUT_DIR/Folio.app" "$OUT_DIR/Folio.zip"
+mv "$APP" "$OUT_DIR/Folio.app"
+rm -rf "$STAGE"
+ditto -c -k --keepParent "$OUT_DIR/Folio.app" "$OUT_DIR/Folio.zip"
+
+if [ -n "${FOLIO_SIGN_IDENTITY:-}" ] && [ -n "${FOLIO_NOTARY_PROFILE:-}" ]; then
+    echo "  notarizando…"
+    xcrun notarytool submit "$OUT_DIR/Folio.zip" --keychain-profile "$FOLIO_NOTARY_PROFILE" --wait
+    xcrun stapler staple "$OUT_DIR/Folio.app"
+    rm -f "$OUT_DIR/Folio.zip"
+    ditto -c -k --keepParent "$OUT_DIR/Folio.app" "$OUT_DIR/Folio.zip"
 fi
 
-# ── Create DMG ───────────────────────────────────────────────
 echo ""
-echo "▸ Creating DMG..."
-
-DMG_PATH="$BUILD_DIR/Folio.dmg"
-DMG_CREATED=0
-if command -v hdiutil >/dev/null 2>&1; then
-    if hdiutil create \
-        -volname "Folio" \
-        -srcfolder "$APP_DIR" \
-        -ov \
-        -format UDZO \
-        "$DMG_PATH" 2>/dev/null; then
-        DMG_CREATED=1
-    else
-        echo "  ! DMG creation failed; app bundle is still ready at $APP_DIR"
-    fi
-else
-    echo "  ! hdiutil not available; skipping DMG creation"
-fi
-
-echo ""
-echo "╔══════════════════════════════════════╗"
-echo "║            Build Complete!           ║"
-echo "╚══════════════════════════════════════╝"
-echo ""
-echo "  App:  $APP_DIR"
-if [ "$DMG_CREATED" -eq 1 ]; then
-    echo "  DMG:  $DMG_PATH"
-else
-    echo "  DMG:  skipped"
-fi
-echo "  Size: $(du -sh "$APP_DIR" | awk '{print $1}')"
-echo ""
-echo "  To test: open \"$APP_DIR\""
-if [ "$DMG_CREATED" -eq 1 ]; then
-    echo "  To distribute: share $DMG_PATH"
-fi
-echo ""
+echo "  ✓ $OUT_DIR/Folio.app  ($(du -sh "$OUT_DIR/Folio.app" | awk '{print $1}'))"
+echo "  ✓ $OUT_DIR/Folio.zip  ($(du -h "$OUT_DIR/Folio.zip" | awk '{print $1}'))"

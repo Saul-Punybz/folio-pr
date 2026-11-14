@@ -307,35 +307,6 @@ func (s *ArticleStore) CountToday(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// ListExpiredEvidence returns articles whose evidence has expired and should be cleaned.
-func (s *ArticleStore) ListExpiredEvidence(ctx context.Context) ([]Article, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, source, url, canonical_url, region, published_at,
-		       clean_text, summary, image_url, status, pinned, evidence_policy,
-		       evidence_expires_at, tags, created_at
-		FROM articles
-		WHERE evidence_expires_at < now()
-		  AND evidence_policy != 'keep'
-		  AND evidence_expires_at IS NOT NULL
-		ORDER BY evidence_expires_at ASC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("article list expired evidence: %w", err)
-	}
-	defer rows.Close()
-
-	var articles []Article
-	for rows.Next() {
-		a := scanArticleFromRow(rows)
-		if a == nil {
-			return nil, fmt.Errorf("article expired evidence scan: failed")
-		}
-		articles = append(articles, *a)
-	}
-
-	return articles, rows.Err()
-}
-
 // SetImageURL updates the image_url field on an article.
 func (s *ArticleStore) SetImageURL(ctx context.Context, id uuid.UUID, imageURL string) error {
 	var val *string
@@ -345,17 +316,6 @@ func (s *ArticleStore) SetImageURL(ctx context.Context, id uuid.UUID, imageURL s
 	_, err := s.pool.Exec(ctx, `UPDATE articles SET image_url = $1 WHERE id = $2`, val, id)
 	if err != nil {
 		return fmt.Errorf("article set image_url: %w", err)
-	}
-	return nil
-}
-
-// ClearEvidenceExpiry sets evidence_expires_at to NULL for the given article.
-func (s *ArticleStore) ClearEvidenceExpiry(ctx context.Context, id uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE articles SET evidence_expires_at = NULL WHERE id = $1
-	`, id)
-	if err != nil {
-		return fmt.Errorf("article clear evidence expiry: %w", err)
 	}
 	return nil
 }

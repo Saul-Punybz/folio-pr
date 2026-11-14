@@ -14,10 +14,11 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Saul-Punybz/folio/internal/config"
+	"github.com/Saul-Punybz/folio/internal/handlers"
 	"github.com/Saul-Punybz/folio/internal/models"
 )
 
-const minPasswordLen = 10
+const minPasswordLen = handlers.MinPasswordLen
 
 // userCommand atiende `folio user add|list`.
 func userCommand(args []string) error {
@@ -57,7 +58,7 @@ func userCommand(args []string) error {
 			return fmt.Errorf("hash: %w", err)
 		}
 
-		pool, err := connect(ctx, config.Load())
+		pool, err := connect(ctx, config.Load().DB)
 		if err != nil {
 			return err
 		}
@@ -79,7 +80,7 @@ func userCommand(args []string) error {
 		return nil
 
 	case "list":
-		pool, err := connect(ctx, config.Load())
+		pool, err := connect(ctx, config.Load().DB)
 		if err != nil {
 			return err
 		}

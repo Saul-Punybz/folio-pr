@@ -2,6 +2,7 @@
 // embebido + tareas programadas (cron), sin IA.
 //
 //	folio                              servir (HTTP + cron)
+//	folio app                          modo app: Postgres embebido + navegador
 //	folio user add <email> [admin|member]   crear o actualizar un usuario
 //	folio user list                    listar usuarios
 //
@@ -15,9 +16,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // zonas horarias dentro del binario (servidor sin tzdata)
@@ -27,7 +30,6 @@ import (
 	folio "github.com/Saul-Punybz/folio"
 	"github.com/Saul-Punybz/folio/internal/config"
 	"github.com/Saul-Punybz/folio/internal/db"
-	"github.com/Saul-Punybz/folio/internal/storage"
 )
 
 func main() {
@@ -36,6 +38,22 @@ func main() {
 	})))
 
 	args := os.Args[1:]
+	// Doble clic en Folio.app: lanzador que arranca `folio app` en segundo
+	// plano (o abre el que ya corre) y sale.
+	if insideAppBundle() && (len(args) == 0 || strings.HasPrefix(args[0], "-psn")) {
+		if err := launch(); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(args) > 0 && args[0] == "app" {
+		if err := runApp(); err != nil {
+			slog.Error("folio: fatal", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(args) == 0 || args[0] == "serve" {
 		if err := serve(); err != nil {
 			slog.Error("folio: fatal", "err", err)
@@ -58,16 +76,25 @@ func main() {
 
 const usage = `uso:
   folio                                 servir (HTTP + cron)
+  folio app                             modo app (Postgres embebido, 127.0.0.1:47615, abre el navegador)
   folio user add <email> [admin|member] crear/actualizar usuario (contraseña en FOLIO_PASSWORD o stdin)
   folio user list                       listar usuarios`
 
 // connect abre el pool y aplica las migraciones embebidas.
-func connect(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
+func connect(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
 	migrationsFS, err := fs.Sub(folio.Migrations, "migrations")
 	if err != nil {
 		return nil, fmt.Errorf("embedded migrations: %w", err)
 	}
-	return db.ConnectWithFS(ctx, cfg.DB, migrationsFS)
+	return db.ConnectWithFS(ctx, cfg, migrationsFS)
+}
+
+// serverOptions: lo que cambia entre `folio` (servidor) y `folio app`.
+type serverOptions struct {
+	db       config.DBConfig
+	listener net.Listener
+	cron     cronOptions
+	onReady  func() // tras quedar escuchando (abrir el navegador)
 }
 
 func serve() error {
@@ -77,39 +104,45 @@ func serve() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	connectCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	pool, err := connect(connectCtx, cfg)
+	ln, err := net.Listen("tcp", cfg.Server.Addr())
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", cfg.Server.Addr(), err)
+	}
+	return runServer(ctx, serverOptions{db: cfg.DB, listener: ln})
+}
+
+// runServer conecta la base, aplica migraciones, sirve HTTP en o.listener y
+// corre el cron hasta que ctx se cancele; luego apaga en orden y cierra el pool.
+func runServer(ctx context.Context, o serverOptions) error {
+	connectCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	pool, err := connect(connectCtx, o.db)
 	cancel()
 	if err != nil {
+		o.listener.Close()
 		return err
 	}
 	defer pool.Close()
 
-	storageClient, err := storage.NewClient(ctx, cfg.S3)
-	if err != nil {
-		slog.Warn("storage: not available, evidence archive disabled", "err", err)
-		storageClient = nil
-	}
-
 	frontendFS, err := fs.Sub(folio.FrontendDist, "frontend/dist")
 	if err != nil {
+		o.listener.Close()
 		return fmt.Errorf("embedded frontend: %w", err)
 	}
 
 	st := newStores(pool)
-	handler := newRouter(st, storageClient, frontendFS)
+	handler := newRouter(st, frontendFS)
 
 	// Cron. jobCtx se cancela al apagar para que los trabajos en curso paren.
 	jobCtx, jobCancel := context.WithCancel(context.Background())
 	defer jobCancel()
 	tracker := &jobTracker{}
-	scheduler, err := startCron(jobCtx, tracker, st, storageClient)
+	scheduler, err := startCron(jobCtx, tracker, st, o.cron)
 	if err != nil {
+		o.listener.Close()
 		return err
 	}
 
 	srv := &http.Server{
-		Addr:              cfg.Server.Addr(),
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -119,12 +152,15 @@ func serve() error {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		slog.Info("folio: listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Info("folio: listening", "addr", o.listener.Addr().String())
+		if err := srv.Serve(o.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 		}
 		close(serverErr)
 	}()
+	if o.onReady != nil {
+		o.onReady()
+	}
 
 	var runErr error
 	select {

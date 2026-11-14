@@ -16,7 +16,6 @@ import (
 	"github.com/Saul-Punybz/folio/internal/middleware"
 	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/scraper"
-	"github.com/Saul-Punybz/folio/internal/storage"
 )
 
 // stores agrupa todos los accesos a la base que usan el router y el cron.
@@ -62,21 +61,22 @@ func (s *stores) scraperStores() scraper.Stores {
 
 // newRouter arma el router: API bajo /api (con sesión salvo health y login),
 // el feed RSS público por token, y el frontend embebido para todo lo demás.
-func newRouter(st *stores, storageClient *storage.Client, frontendFS fs.FS) http.Handler {
+func newRouter(st *stores, frontendFS fs.FS) http.Handler {
 	sc := scraper.NewScraper()
 
 	authH := &handlers.AuthHandler{Users: st.users, Sessions: st.sessions}
+	setupH := &handlers.SetupHandler{Users: st.users}
 	itemsH := &handlers.ItemsHandler{Articles: st.articles, Scraper: sc}
 	searchH := &handlers.SearchHandler{Articles: st.articles}
 	sourcesH := &handlers.SourcesHandler{Sources: st.sources, Scraper: sc}
 	notesH := &handlers.NotesHandler{Notes: st.notes, Articles: st.articles}
 	watchH := &handlers.WatchlistHandler{Orgs: st.watchOrgs, Hits: st.watchHits, Articles: st.articles}
-	exportH := &handlers.ExportHandler{Articles: st.articles, Notes: st.notes, Storage: storageClient}
+	exportH := &handlers.ExportHandler{Articles: st.articles, Notes: st.notes}
 	feedH := &handlers.FeedHandler{Users: st.users, Hits: st.watchHits}
 	oppH := &handlers.OpportunityHandler{Opportunities: st.opportunities}
 	adminH := &handlers.AdminHandler{
 		Articles: st.articles, Sources: st.sources, Fingerprints: st.fingerprints,
-		Scraper: sc, Storage: storageClient,
+		Scraper: sc,
 	}
 	cd := st.crawlDeps
 	crawlerH := &handlers.CrawlerHandler{
@@ -98,6 +98,9 @@ func newRouter(st *stores, storageClient *storage.Client, frontendFS fs.FS) http
 	// ── Públicas ──────────────────────────────────────────────────
 	r.Get("/api/health", handlers.Health)
 	r.With(middleware.RateLimit(loginLimiter)).Post("/api/login", authH.Login)
+	// Primer arranque: crear el primer admin (409 cuando ya hay usuarios).
+	r.Get("/api/setup", setupH.Status)
+	r.With(middleware.RateLimit(loginLimiter)).Post("/api/setup", setupH.Create)
 	r.Get("/feed/{token}.xml", feedH.ServeFeed)
 
 	// ── Con sesión ────────────────────────────────────────────────

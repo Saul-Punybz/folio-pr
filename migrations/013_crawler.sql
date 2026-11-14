@@ -54,7 +54,6 @@ CREATE TABLE IF NOT EXISTS crawled_pages (
     tags            JSONB NOT NULL DEFAULT '[]',
     entities        JSONB NOT NULL DEFAULT '{}',
     sentiment       TEXT NOT NULL DEFAULT 'unknown',
-    embedding       vector(768),
     links_out       INT NOT NULL DEFAULT 0,
     links_in        INT NOT NULL DEFAULT 0,
     depth           INT NOT NULL DEFAULT 0,

@@ -10,7 +10,6 @@ import (
 type Config struct {
 	DB     DBConfig
 	Server ServerConfig
-	S3     S3Config
 }
 
 // DBConfig holds PostgreSQL connection parameters.
@@ -41,15 +40,6 @@ func (c ServerConfig) Addr() string {
 	return c.Host + c.Port
 }
 
-// S3Config holds S3-compatible object storage parameters.
-type S3Config struct {
-	Endpoint  string
-	Bucket    string
-	AccessKey string
-	SecretKey string
-	Region    string
-}
-
 // Load reads configuration from environment variables with sensible defaults.
 func Load() Config {
 	return Config{
@@ -63,14 +53,7 @@ func Load() Config {
 		},
 		Server: ServerConfig{
 			Port: envOr("SERVER_PORT", ":8080"),
-			Host: envOr("SERVER_HOST", ""),
-		},
-		S3: S3Config{
-			Endpoint:  envOr("S3_ENDPOINT", ""),
-			Bucket:    envOr("S3_BUCKET", "folio-evidence"),
-			AccessKey: envOr("S3_ACCESS_KEY", ""),
-			SecretKey: envOr("S3_SECRET_KEY", ""),
-			Region:    envOr("S3_REGION", "us-ashburn-1"),
+			Host: envOr("SERVER_HOST", "127.0.0.1"),
 		},
 	}
 }

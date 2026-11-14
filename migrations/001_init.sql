@@ -1,5 +1,5 @@
 -- Folio: Political Intelligence System — Initial Schema
--- Run against PostgreSQL 16+ with pgvector extension
+-- Run against PostgreSQL 16+ (sin pgvector: Folio ya no usa IA)
 --
 -- This migration creates the core tables:
 --   users, sessions, sources, articles, fingerprints, notes
@@ -7,7 +7,6 @@
 
 -- ── Extensions ───────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "vector";
 
 -- ── Users & Sessions ─────────────────────────────────────────
 
@@ -64,7 +63,6 @@ CREATE TABLE articles (
     evidence_policy     TEXT NOT NULL DEFAULT 'ret_3m' CHECK (evidence_policy IN ('ret_3m', 'ret_6m', 'ret_12m', 'keep')),
     evidence_expires_at TIMESTAMPTZ,
     tags                JSONB DEFAULT '[]',
-    embedding           vector(768),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_articles_status ON articles(status);
@@ -77,8 +75,6 @@ CREATE INDEX idx_articles_evidence_expires ON articles(evidence_expires_at) WHER
 -- Full text search index (Spanish — primary language of PR sources)
 CREATE INDEX idx_articles_fts ON articles USING GIN (to_tsvector('spanish', coalesce(title, '') || ' ' || coalesce(clean_text, '')));
 
--- Vector similarity index — uncomment after you have sufficient data (1000+ rows)
--- CREATE INDEX idx_articles_embedding ON articles USING hnsw (embedding vector_cosine_ops);
 
 -- ── Fingerprints (deduplication) ─────────────────────────────
 

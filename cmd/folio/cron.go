@@ -12,7 +12,6 @@ import (
 
 	"github.com/Saul-Punybz/folio/internal/crawler"
 	"github.com/Saul-Punybz/folio/internal/scraper"
-	"github.com/Saul-Punybz/folio/internal/storage"
 	"github.com/Saul-Punybz/folio/internal/watch"
 )
 
@@ -58,8 +57,53 @@ func cronLocation() *time.Location {
 	return loc
 }
 
+// task es un trabajo con nombre, timeout y su propio candado: la corrida de
+// arranque y la del cron nunca se pisan.
+type task struct {
+	name    string
+	timeout time.Duration
+	fn      func(context.Context)
+	mu      sync.Mutex
+}
+
+// run ejecuta la tarea. wait=false (cron): si ya corre, se salta.
+// wait=true (puesta al día del arranque): espera su turno.
+func (tk *task) run(ctx context.Context, wait bool) {
+	if wait {
+		tk.mu.Lock()
+	} else if !tk.mu.TryLock() {
+		slog.Info("cron: already running, skipping", "job", tk.name)
+		return
+	}
+	defer tk.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	jobCtx, cancel := context.WithTimeout(ctx, tk.timeout)
+	defer cancel()
+	slog.Info("cron: start", "job", tk.name)
+	tk.fn(jobCtx)
+}
+
+type cronOptions struct {
+	// catchUp: al arrancar, correr una vez y en orden lo que tocaba mientras
+	// la app estuvo cerrada (modo app). Si es false, solo la ingesta inicial.
+	catchUp bool
+	// extra: tareas adicionales (p. ej. el respaldo) con su horario.
+	extra []extraJob
+}
+
+type extraJob struct {
+	spec    string
+	name    string
+	timeout time.Duration
+	fn      func(context.Context)
+	// atStartup: corre también al arrancar, antes de la puesta al día.
+	atStartup bool
+}
+
 // startCron registra y arranca las tareas programadas. Ninguna usa IA.
-func startCron(ctx context.Context, t *jobTracker, st *stores, storageClient *storage.Client) (*cron.Cron, error) {
+func startCron(ctx context.Context, t *jobTracker, st *stores, opts cronOptions) (*cron.Cron, error) {
 	loc := cronLocation()
 	c := cron.New(
 		cron.WithLocation(loc),
@@ -70,79 +114,80 @@ func startCron(ctx context.Context, t *jobTracker, st *stores, storageClient *st
 	ss := st.scraperStores()
 	sc := scraper.NewScraper()
 
-	// job envuelve cada tarea: cuenta en el tracker y le da su timeout.
-	job := func(name string, timeout time.Duration, fn func(context.Context)) func() {
+	ingestion := &task{name: "ingestion", timeout: 3 * time.Hour, fn: func(jobCtx context.Context) {
+		n := scraper.RunIngestion(jobCtx, ss, sc)
+		slog.Info("cron: ingestion done", "articles", n)
+	}}
+	watchScan := &task{name: "watchlist-scan", timeout: 2 * time.Hour, fn: func(jobCtx context.Context) {
+		watch.RunWatchlistScan(jobCtx, watch.Deps{Orgs: st.watchOrgs, Hits: st.watchHits, Articles: st.articles})
+	}}
+	crawl := &task{name: "crawler", timeout: 110 * time.Minute, fn: func(jobCtx context.Context) {
+		crawler.RunCrawl(jobCtx, st.crawlDeps, 500)
+	}}
+	recrawl := &task{name: "recrawl", timeout: 30 * time.Minute, fn: func(jobCtx context.Context) {
+		crawler.RunRecrawl(jobCtx, st.crawlDeps)
+	}}
+	oppStatuses := &task{name: "opportunity-statuses", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
+		n, err := st.opportunities.RefreshStatuses(jobCtx)
+		if err != nil {
+			slog.Error("cron: refresh opportunity statuses", "err", err)
+			return
+		}
+		slog.Info("cron: opportunity statuses refreshed", "updated", n)
+	}}
+	sessionCleanup := &task{name: "session-cleanup", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
+		scraper.RunSessionCleanup(jobCtx, st.sessions)
+	}}
+
+	// fromCron envuelve una tarea para el cron: cuenta en el tracker.
+	fromCron := func(tk *task) func() {
 		return func() {
 			if !t.start() {
 				return
 			}
 			defer t.done()
-			jobCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			slog.Info("cron: start", "job", name)
-			fn(jobCtx)
+			tk.run(ctx, false)
 		}
-	}
-
-	// La corrida inicial y la del cron no deben pisarse.
-	var ingestMu sync.Mutex
-	ingest := func(jobCtx context.Context) {
-		if !ingestMu.TryLock() {
-			slog.Info("cron: ingestion already running, skipping")
-			return
-		}
-		defer ingestMu.Unlock()
-		n := scraper.RunIngestion(jobCtx, ss, sc, storageClient)
-		slog.Info("cron: ingestion done", "articles", n)
 	}
 
 	specs := []struct {
 		spec string
-		name string
-		fn   func()
+		tk   *task
 	}{
-		{"0 */4 * * *", "ingestion", job("ingestion", 3*time.Hour, ingest)},
-		{"0 1,7,13,19 * * *", "watchlist-scan", job("watchlist-scan", 2*time.Hour, func(jobCtx context.Context) {
-			watch.RunWatchlistScan(jobCtx, watch.Deps{Orgs: st.watchOrgs, Hits: st.watchHits, Articles: st.articles})
-		})},
-		{"0 */2 * * *", "crawler", job("crawler", 110*time.Minute, func(jobCtx context.Context) {
-			crawler.RunCrawl(jobCtx, st.crawlDeps, 500)
-		})},
-		{"0 2 * * *", "recrawl", job("recrawl", 30*time.Minute, func(jobCtx context.Context) {
-			crawler.RunRecrawl(jobCtx, st.crawlDeps)
-		})},
-		{"0 6 * * *", "opportunity-statuses", job("opportunity-statuses", 5*time.Minute, func(jobCtx context.Context) {
-			n, err := st.opportunities.RefreshStatuses(jobCtx)
-			if err != nil {
-				slog.Error("cron: refresh opportunity statuses", "err", err)
-				return
-			}
-			slog.Info("cron: opportunity statuses refreshed", "updated", n)
-		})},
-		{"0 4 * * *", "session-cleanup", job("session-cleanup", 5*time.Minute, func(jobCtx context.Context) {
-			scraper.RunSessionCleanup(jobCtx, st.sessions)
-		})},
+		{"0 */4 * * *", ingestion},
+		{"0 1,7,13,19 * * *", watchScan},
+		{"0 */2 * * *", crawl},
+		{"0 2 * * *", recrawl},
+		{"0 6 * * *", oppStatuses},
+		{"0 4 * * *", sessionCleanup},
 	}
-	if storageClient.Configured() {
+	var startup []*task
+	for _, e := range opts.extra {
+		tk := &task{name: e.name, timeout: e.timeout, fn: e.fn}
 		specs = append(specs, struct {
 			spec string
-			name string
-			fn   func()
-		}{"0 3 * * *", "evidence-cleanup", job("evidence-cleanup", 30*time.Minute, func(jobCtx context.Context) {
-			scraper.RunEvidenceCleanup(jobCtx, ss, storageClient)
-		})})
+			tk   *task
+		}{e.spec, tk})
+		if e.atStartup {
+			startup = append(startup, tk)
+		}
 	}
-
 	for _, s := range specs {
-		if _, err := c.AddFunc(s.spec, s.fn); err != nil {
-			return nil, fmt.Errorf("cron %s: %w", s.name, err)
+		if _, err := c.AddFunc(s.spec, fromCron(s.tk)); err != nil {
+			return nil, fmt.Errorf("cron %s: %w", s.tk.name, err)
 		}
 	}
 	c.Start()
-	slog.Info("cron: started", "jobs", len(c.Entries()), "tz", loc.String(), "evidence_cleanup", storageClient.Configured())
+	slog.Info("cron: started", "jobs", len(c.Entries()), "tz", loc.String(), "catch_up", opts.catchUp)
 
-	// Corrida inicial de ingesta a los 10 s. El Add se hace AQUÍ, antes de
-	// lanzar la goroutine, para que no compita con el Wait del apagado.
+	// Corrida de arranque a los 10 s. El Add se hace AQUÍ, antes de lanzar la
+	// goroutine, para que no compita con el Wait del apagado.
+	if opts.catchUp {
+		// Lo que tocaba mientras estuvo cerrada, una vez y en este orden.
+		startup = append(startup, ingestion, crawl, recrawl, watchScan, oppStatuses)
+	} else {
+		startup = append(startup, ingestion)
+	}
 	if t.start() {
 		go func() {
 			defer t.done()
@@ -151,10 +196,14 @@ func startCron(ctx context.Context, t *jobTracker, st *stores, storageClient *st
 			case <-ctx.Done():
 				return
 			}
-			jobCtx, cancel := context.WithTimeout(ctx, 3*time.Hour)
-			defer cancel()
-			slog.Info("cron: initial ingestion")
-			ingest(jobCtx)
+			slog.Info("cron: startup run", "jobs", len(startup))
+			for _, tk := range startup {
+				if ctx.Err() != nil {
+					return
+				}
+				tk.run(ctx, true)
+			}
+			slog.Info("cron: startup run done")
 		}()
 	}
 

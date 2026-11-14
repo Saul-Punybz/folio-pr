@@ -174,3 +174,46 @@ func (s *UserStore) ResetFeedToken(ctx context.Context, userID uuid.UUID) (strin
 	}
 	return token, nil
 }
+
+// Count devuelve cuántos usuarios hay.
+func (s *UserStore) Count(ctx context.Context) (int, error) {
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("user count: %w", err)
+	}
+	return n, nil
+}
+
+// CreateFirstAdmin crea el primer usuario (admin) solo si la tabla está vacía.
+// Un candado de transacción serializa dos peticiones simultáneas: solo una
+// puede crear. Devuelve false (sin error) si ya existía algún usuario.
+func (s *UserStore) CreateFirstAdmin(ctx context.Context, email, passwordHash string) (*User, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("first admin: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op tras Commit
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7461637)`); err != nil {
+		return nil, false, fmt.Errorf("first admin: lock: %w", err)
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users)`).Scan(&exists); err != nil {
+		return nil, false, fmt.Errorf("first admin: check: %w", err)
+	}
+	if exists {
+		return nil, false, nil
+	}
+	u := &User{ID: uuid.New(), Email: email, PasswordHash: passwordHash, Role: "admin"}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO users (id, email, password_hash, role)
+		VALUES ($1, $2, $3, $4)
+		RETURNING created_at
+	`, u.ID, u.Email, u.PasswordHash, u.Role).Scan(&u.CreatedAt); err != nil {
+		return nil, false, fmt.Errorf("first admin: insert: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("first admin: commit: %w", err)
+	}
+	return u, true, nil
+}

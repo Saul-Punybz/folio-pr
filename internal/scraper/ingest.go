@@ -2,7 +2,6 @@ package scraper
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Saul-Punybz/folio/internal/models"
-	"github.com/Saul-Punybz/folio/internal/storage"
 )
 
 const (
@@ -49,7 +47,7 @@ type Stores struct {
 // discovers article URLs, deduplicates via fingerprints, scrapes content, and
 // stores each article with a rule-based summary (no AI). It returns the number
 // of articles created.
-func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, storageClient *storage.Client) int {
+func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 	slog.Info("ingestion: starting run")
 	startTime := time.Now()
 
@@ -272,7 +270,6 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, storageC
 				"has_image", imageURL != "",
 			)
 
-			storeEvidence(ctx, article, rawHTML, storageClient)
 		}
 	}
 
@@ -350,73 +347,6 @@ func discoverArticles(ctx context.Context, src models.Source, scraper *Scraper) 
 	default:
 		return nil, fmt.Errorf("source %s: unsupported feed_type %q", src.Name, src.FeedType)
 	}
-}
-
-// storeEvidence sube a S3 (si hay storage) el HTML crudo y lo extraído por
-// reglas. No hay IA: resumen y tags ya vienen calculados en el artículo.
-func storeEvidence(ctx context.Context, article *models.Article, rawHTML string, storageClient *storage.Client) {
-	if !storageClient.Configured() {
-		return
-	}
-	extracted, err := json.Marshal(map[string]interface{}{
-		"title":   article.Title,
-		"text":    article.CleanText,
-		"tags":    article.Tags,
-		"summary": article.Summary,
-	})
-	if err != nil {
-		slog.Error("evidence: marshal extracted", "id", article.ID, "err", err)
-		return
-	}
-	policy := article.EvidencePolicy
-	if policy == "" {
-		policy = defaultEvidencePolicy
-	}
-	if err := storageClient.StoreEvidence(ctx, article.ID, policy, []byte(rawHTML), extracted, nil); err != nil {
-		slog.Error("evidence: upload", "id", article.ID, "err", err)
-	}
-}
-
-// RunEvidenceCleanup deletes expired evidence from S3 and clears the expiry
-// timestamp on the corresponding articles.
-func RunEvidenceCleanup(ctx context.Context, stores Stores, storageClient *storage.Client) {
-	slog.Info("evidence cleanup: starting")
-
-	expired, err := stores.Articles.ListExpiredEvidence(ctx)
-	if err != nil {
-		slog.Error("evidence cleanup: list expired", "err", err)
-		return
-	}
-
-	if len(expired) == 0 {
-		slog.Info("evidence cleanup: no expired evidence")
-		return
-	}
-
-	slog.Info("evidence cleanup: processing", "count", len(expired))
-
-	cleaned := 0
-	for _, article := range expired {
-		if ctx.Err() != nil {
-			break
-		}
-
-		// Delete from S3.
-		if err := storageClient.DeleteEvidence(ctx, article.ID); err != nil {
-			slog.Error("evidence cleanup: delete", "id", article.ID, "err", err)
-			continue
-		}
-
-		// Clear the expiry timestamp.
-		if err := stores.Articles.ClearEvidenceExpiry(ctx, article.ID); err != nil {
-			slog.Error("evidence cleanup: clear expiry", "id", article.ID, "err", err)
-			continue
-		}
-
-		cleaned++
-	}
-
-	slog.Info("evidence cleanup: complete", "cleaned", cleaned, "total", len(expired))
 }
 
 // RunSessionCleanup deletes expired sessions from the database.

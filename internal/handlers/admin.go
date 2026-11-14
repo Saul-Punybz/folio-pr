@@ -8,7 +8,6 @@ import (
 
 	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/scraper"
-	"github.com/Saul-Punybz/folio/internal/storage"
 )
 
 // AdminHandler groups admin-only HTTP handlers.
@@ -17,7 +16,6 @@ type AdminHandler struct {
 	Sources      *models.SourceStore
 	Fingerprints *models.FingerprintStore
 	Scraper      *scraper.Scraper
-	Storage      *storage.Client
 }
 
 // TriggerIngest handles POST /api/admin/ingest.
@@ -37,7 +35,7 @@ func (h *AdminHandler) TriggerIngest(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
 		defer cancel()
-		n := scraper.RunIngestion(ctx, stores, h.Scraper, h.Storage)
+		n := scraper.RunIngestion(ctx, stores, h.Scraper)
 		slog.Info("admin: manual ingestion finished", "articles", n)
 	}()
 

@@ -11,18 +11,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Saul-Punybz/folio/internal/models"
-	"github.com/Saul-Punybz/folio/internal/storage"
 )
 
 // ExportHandler groups export-related HTTP handlers.
 type ExportHandler struct {
 	Articles *models.ArticleStore
 	Notes    *models.NoteStore
-	Storage  *storage.Client
 }
 
 // ExportArticle handles GET /api/items/{id}/export.
-// Returns a ZIP file containing the article data, notes, and evidence.
+// Returns a ZIP file containing the article data and notes.
 func (h *ExportHandler) ExportArticle(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -133,29 +131,6 @@ func (h *ExportHandler) writeArticleToZip(zw *zip.Writer, prefix string, article
 		}
 		if _, err := nw.Write(notesJSON); err != nil {
 			return fmt.Errorf("write notes.json: %w", err)
-		}
-	}
-
-	// Evidence from S3 (if configured and available).
-	if h.Storage != nil && h.Storage.Configured() {
-		evidence, err := h.Storage.GetEvidence(r.Context(), article.ID)
-		if err == nil {
-			// Raw HTML.
-			if len(evidence.RawHTML) > 0 {
-				rw, err := zw.Create(prefix + "evidence/raw.html")
-				if err == nil {
-					rw.Write(evidence.RawHTML)
-				}
-			}
-			// Extracted text.
-			if len(evidence.Extracted) > 0 {
-				ew, err := zw.Create(prefix + "evidence/extracted.json")
-				if err == nil {
-					ew.Write(evidence.Extracted)
-				}
-			}
-		} else {
-			slog.Debug("export: no evidence available", "article_id", article.ID)
 		}
 	}
 

@@ -1,18 +1,10 @@
 # Folio — Political Intelligence System
 # Run `make help` to see all available targets.
 
-.PHONY: dev down migrate seed build build-linux test frontend logs help
+.PHONY: migrate seed build build-linux test frontend mac run-app help
 
 # Default database connection for local development
 DB_URL ?= postgres://folio:folio_dev@localhost:5432/folio?sslmode=disable
-
-## dev: Build and start all services with Docker Compose
-dev:
-	docker compose up --build -d
-
-## down: Stop all services
-down:
-	docker compose down
 
 ## migrate: Run all SQL migrations against the local database
 migrate:
@@ -45,9 +37,13 @@ test:
 frontend:
 	cd frontend && npm install && npm run build
 
-## logs: Tail Docker Compose logs
-logs:
-	docker compose logs -f
+## mac: Build build/Folio.app + build/Folio.zip (Apple Silicon, Postgres embebido)
+mac:
+	bash scripts/build-macos.sh
+
+## run-app: Run the built app in the foreground without opening the browser
+run-app:
+	FOLIO_NO_BROWSER=1 build/Folio.app/Contents/MacOS/Folio app
 
 ## help: Show this help message
 help:
