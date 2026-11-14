@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type Opportunity, type CrawlDomain, type CrawlRun, type CrawlerStatsResponse } from '../lib/api';
+import { Icon, Spinner, EmptyState } from './ui';
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -8,14 +9,14 @@ function daysUntil(dateStr: string | null): string {
   const deadline = new Date(dateStr).getTime();
   const now = Date.now();
   const days = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
-  if (days < 0) return `${Math.abs(days)}d pasado`;
+  if (days < 0) return `hace ${Math.abs(days)} d`;
   if (days === 0) return 'Hoy';
-  if (days === 1) return 'Manana';
-  return `${days} dias`;
+  if (days === 1) return 'Mañana';
+  return `en ${days} días`;
 }
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return 'N/A';
+  if (!dateStr) return 'Sin fecha';
   return new Date(dateStr).toLocaleDateString('es-PR', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
@@ -25,38 +26,38 @@ function timeAgo(dateStr: string): string {
   const diff = now - then;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'ahora';
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return `hace ${mins} min`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
+  if (hrs < 24) return `hace ${hrs} h`;
   const days = Math.floor(hrs / 24);
-  return `${days}d`;
+  return `hace ${days} d`;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  rfp: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
-  grant: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
-  funding: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
-  proposal: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  contract: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  fellowship: 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300',
-  scholarship: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300',
-  other: 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300',
+  rfp: 'bg-primary-container text-on-primary-container',
+  grant: 'bg-primary-container text-on-primary-container',
+  funding: 'bg-primary-container text-on-primary-container',
+  proposal: 'bg-primary-container text-on-primary-container',
+  contract: 'bg-primary-container text-on-primary-container',
+  fellowship: 'bg-primary-container text-on-primary-container',
+  scholarship: 'bg-primary-container text-on-primary-container',
+  other: 'bg-surface-container-highest text-on-surface',
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  open: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-  closing_soon: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
-  closed: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400',
-  unknown: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
+  open: 'bg-success-container text-on-success-container',
+  closing_soon: 'bg-tertiary-container text-on-tertiary-container',
+  closed: 'bg-surface-container-highest text-on-surface-variant',
+  unknown: 'bg-surface-container-highest text-on-surface-variant',
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  open: 'Abierta', closing_soon: 'Pronto Cierra', closed: 'Cerrada', unknown: 'Sin Fecha',
+  open: 'Abierta', closing_soon: 'Cierra pronto', closed: 'Cerrada', unknown: 'Sin fecha',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
-  rfp: 'RFP', grant: 'Grant', funding: 'Fondos', proposal: 'Propuesta',
-  contract: 'Contrato', fellowship: 'Fellowship', scholarship: 'Beca', other: 'Otro',
+  rfp: 'RFP', grant: 'Subvención', funding: 'Fondos', proposal: 'Propuesta',
+  contract: 'Contrato', fellowship: 'Programa', scholarship: 'Beca', other: 'Otro',
 };
 
 const DOMAIN_CATEGORY_OPTIONS = [
@@ -73,9 +74,6 @@ type Tab = 'oportunidades' | 'dominios';
 
 // Process phases for the single-button flow
 type ProcessPhase = 'idle' | 'crawling' | 'done';
-
-// ── Main Component ─────────────────────────────────────────────────
-// All process state is here so tab switching never kills a running scan.
 
 export default function CrawlerDesk() {
   const [activeTab, setActiveTab] = useState<Tab>('oportunidades');
@@ -145,87 +143,50 @@ export default function CrawlerDesk() {
   const isBusy = phase !== 'idle' && phase !== 'done';
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
+      <h1 className="title-xl">Fondos</h1>
 
-      {/* ── Global Progress Bar ── visible on any tab */}
       {phase !== 'idle' && (
-        <div className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-medium ${
-          phase === 'done'
-            ? 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800'
-            : 'bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800'
-        }`}>
-          {isBusy && (
-            <div className="relative w-4 h-4 shrink-0">
-              <span className="absolute inset-0 border-2 border-violet-300 dark:border-violet-600 rounded-full" />
-              <span className="absolute inset-0 border-2 border-transparent border-t-violet-600 dark:border-t-violet-300 rounded-full animate-spin" />
-            </div>
-          )}
-          {phase === 'done' && (
-            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-          )}
+        <div role="status" className={`flex items-center gap-3 px-5 py-4 rounded-[24px] text-sm font-bold ${phase === 'done' ? 'bg-success-container text-on-success-container' : 'bg-primary-container text-on-primary-container'}`}>
+          {isBusy && <Spinner className="w-5 h-5 shrink-0" />}
+          {phase === 'done' && <Icon name="check" className="w-6 h-6 shrink-0" />}
           <span className="flex-1">{statusMsg}</span>
         </div>
       )}
 
-      {/* ── Tab Switcher + Scan Button ── */}
-      <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-700 pb-0">
-        <div className="flex gap-1">
-          {(['oportunidades', 'dominios'] as Tab[]).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-                activeTab === tab
-                  ? 'bg-violet-50 text-violet-700 border-b-2 border-violet-500 dark:bg-violet-900/20 dark:text-violet-300'
-                  : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
-              }`}
-            >
-              {tab === 'oportunidades' ? 'Oportunidades' : 'Dominios'}
-            </button>
-          ))}
-        </div>
-
-        {/* THE button — always visible in the header */}
-        <button
-          onClick={handleFullScan}
-          disabled={isBusy || domains.length === 0}
-          className="flex items-center gap-2 text-xs bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:opacity-40 transition-all font-medium shadow-sm mb-1"
-          title={domains.length === 0 ? 'Agrega dominios primero' : 'Escanear agencias y extraer oportunidades'}
-        >
-          {isBusy ? (
-            <>
-              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              {phase === 'crawling' ? 'Escaneando...' : 'Escanear'}
-            </>
-          ) : (
-            <>
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-              Escanear
-            </>
-          )}
-        </button>
+      <div className="chip-row" role="tablist" aria-label="Secciones">
+        {(['oportunidades', 'dominios'] as Tab[]).map(tab => (
+          <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} aria-pressed={activeTab === tab} onClick={() => setActiveTab(tab)} className="chip">
+            {tab === 'oportunidades' ? 'Oportunidades' : 'Agencias'}
+          </button>
+        ))}
       </div>
 
-      {/* ── Tab Content ── */}
       {activeTab === 'oportunidades' && (
-        <OpportunityTab
-          domains={domains}
-          refreshCallbackRef={refreshCallbackRef}
-          isBusy={isBusy}
-          onScan={handleFullScan}
-        />
+        <OpportunityTab domains={domains} refreshCallbackRef={refreshCallbackRef} isBusy={isBusy} onScan={handleFullScan} />
       )}
       {activeTab === 'dominios' && (
-        <DominiosTab
-          domains={domains}
-          onDomainsChanged={loadDomains}
-        />
+        <DominiosTab domains={domains} onDomainsChanged={loadDomains} />
       )}
+
+      {/* La acción principal de la pantalla */}
+      <div className="fab-slot">
+        <button
+          type="button"
+          onClick={handleFullScan}
+          disabled={isBusy || domains.length === 0}
+          className="fab disabled:opacity-50"
+          title={domains.length === 0 ? 'Agrega agencias primero' : 'Buscar fondos nuevos'}
+        >
+          {isBusy ? <Spinner className="w-6 h-6" /> : <Icon name="search" className="w-6 h-6" />}
+          {isBusy ? 'Buscando...' : 'Buscar fondos'}
+        </button>
+      </div>
     </div>
   );
 }
 
-// ── Opportunity Tab ────────────────────────────────────────────────
+// ── Oportunidades ──────────────────────────────────────────────────
 
 function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
   domains: CrawlDomain[];
@@ -299,163 +260,110 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
   const totalCount = stats?.total || 0;
   const hasDomains = domains.length > 0;
 
-  // If no domains configured yet, show setup prompt
   if (!hasDomains) {
     return (
-      <div className="text-center py-20">
-        <svg className="w-16 h-16 mx-auto text-zinc-300 dark:text-zinc-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>
-        <h3 className="text-base font-semibold text-zinc-600 dark:text-zinc-300">Configura tus agencias</h3>
-        <p className="text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
-          Ve a la pestana <strong>Dominios</strong> para agregar los sitios web de agencias gubernamentales que quieres monitorear.
-        </p>
-      </div>
+      <EmptyState icon="globe" text="Agrega las páginas de las agencias que quieres vigilar.">
+        <span className="text-sm font-semibold">Abre «Agencias» arriba.</span>
+      </EmptyState>
     );
   }
 
+  const resetFilters = () => { setStatusFilter(''); setCategoryFilter(''); setDomainFilter(''); setSearchQuery(''); setSearchInput(''); };
+
   return (
-    <div className="flex gap-4">
-
-      {/* ── Left: Domain Sidebar Filter ── */}
-      <div className="w-44 shrink-0 space-y-1">
-        <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider px-2 py-1">
-          Agencias
+    <div className="space-y-5">
+      {totalCount > 0 && (
+        <div className="stagger grid grid-cols-3 gap-3">
+          <StatCard label="Abiertas" value={openCount} tone="ok" />
+          <StatCard label="Cierran pronto" value={closingSoonCount} tone="accent" />
+          <StatCard label="Total" value={totalCount} tone="primary" />
         </div>
-        <button
-          onClick={() => { setDomainFilter(''); setSearchQuery(''); setSearchInput(''); }}
-          className={`w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors ${
-            !domainFilter
-              ? 'bg-violet-100 text-violet-700 font-medium dark:bg-violet-900/30 dark:text-violet-300'
-              : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
-          }`}
-        >
-          Todas ({totalCount})
-        </button>
-        {domains.filter(d => d.active).map(d => (
-          <button
-            key={d.id}
-            onClick={() => { setDomainFilter(d.id); setSearchQuery(''); setSearchInput(''); }}
-            className={`w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors truncate ${
-              domainFilter === d.id
-                ? 'bg-violet-100 text-violet-700 font-medium dark:bg-violet-900/30 dark:text-violet-300'
-                : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
-            }`}
-            title={d.domain}
-          >
-            <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${d.active ? 'bg-green-500' : 'bg-zinc-300'}`} />
-            {d.label || d.domain}
-          </button>
-        ))}
-      </div>
+      )}
 
-      {/* ── Right: Results ── */}
-      <div className="flex-1 min-w-0 space-y-3">
-
-        {/* Stats Cards */}
-        {totalCount > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            <StatCard label="Abiertas" value={openCount} color="text-green-600 dark:text-green-400" />
-            <StatCard label="Pronto Cierra" value={closingSoonCount} color="text-amber-600 dark:text-amber-400" />
-            <StatCard label="Total" value={totalCount} color="text-violet-600 dark:text-violet-400" />
+      {totalCount > 0 && (
+        <div className="space-y-3">
+          <div className="chip-row chip-scroll" role="group" aria-label="Estado">
+            {[
+              { value: '', label: 'Todas' },
+              { value: 'open', label: 'Abiertas' },
+              { value: 'closing_soon', label: 'Cierran pronto' },
+              { value: 'closed', label: 'Cerradas' },
+            ].map(s => (
+              <button key={s.value} type="button" aria-pressed={statusFilter === s.value}
+                onClick={() => { setStatusFilter(s.value); setSearchQuery(''); setSearchInput(''); }} className="chip">
+                {s.label}
+              </button>
+            ))}
           </div>
-        )}
 
-        {/* Filters */}
-        {totalCount > 0 && (
-          <div className="flex flex-wrap gap-2 items-center">
-            <div className="flex gap-1">
-              {[
-                { value: '', label: 'Todas' },
-                { value: 'open', label: 'Abiertas' },
-                { value: 'closing_soon', label: 'Pronto' },
-                { value: 'closed', label: 'Cerradas' },
-              ].map(s => (
-                <button
-                  key={s.value}
-                  onClick={() => { setStatusFilter(s.value); setSearchQuery(''); setSearchInput(''); }}
-                  className={`px-3 py-1 text-xs rounded-full transition-colors ${
-                    statusFilter === s.value
-                      ? 'bg-violet-500 text-white'
-                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
+          <div className="chip-row chip-scroll" role="group" aria-label="Agencia">
+            <button type="button" aria-pressed={!domainFilter} onClick={() => { setDomainFilter(''); setSearchQuery(''); setSearchInput(''); }} className="chip">
+              Todas las agencias
+            </button>
+            {domains.filter(d => d.active).map(d => (
+              <button key={d.id} type="button" aria-pressed={domainFilter === d.id} title={d.domain}
+                onClick={() => { setDomainFilter(d.id); setSearchQuery(''); setSearchInput(''); }} className="chip">
+                {d.label || d.domain}
+              </button>
+            ))}
+          </div>
 
-            <select
-              value={categoryFilter}
-              onChange={e => setCategoryFilter(e.target.value)}
-              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300"
-            >
-              <option value="">Categoria</option>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="sr-only" htmlFor="op-cat">Categoría</label>
+            <select id="op-cat" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="field !w-auto font-semibold text-sm">
+              <option value="">Todas las categorías</option>
               {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
-
-            <select
-              value={sortBy}
-              onChange={e => setSortBy(e.target.value)}
-              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300"
-            >
-              <option value="created_at">Recientes</option>
-              <option value="deadline">Fecha Limite</option>
+            <label className="sr-only" htmlFor="op-sort">Orden</label>
+            <select id="op-sort" value={sortBy} onChange={e => setSortBy(e.target.value)} className="field !w-auto font-semibold text-sm">
+              <option value="created_at">Más recientes</option>
+              <option value="deadline">Fecha límite</option>
               <option value="amount">Monto</option>
-              <option value="confidence">Confianza</option>
+              <option value="confidence">Más seguras</option>
             </select>
-
-            <form onSubmit={handleSearch} className="flex gap-1 ml-auto">
-              <input
-                type="text"
-                value={searchInput}
-                onChange={e => setSearchInput(e.target.value)}
-                placeholder="Buscar..."
-                className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1 w-36 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300"
-              />
-              <button type="submit" className="text-xs bg-violet-500 text-white px-2 py-1 rounded hover:bg-violet-600">
-                Ir
-              </button>
+            <form onSubmit={handleSearch} className="flex gap-2 ml-auto min-w-[220px] flex-1 max-w-sm" role="search">
+              <input type="search" value={searchInput} onChange={e => setSearchInput(e.target.value)} placeholder="Buscar fondos" aria-label="Buscar fondos" className="field" />
+              <button type="submit" className="icon-btn bg-primary-container text-on-primary-container shrink-0" aria-label="Buscar"><Icon name="search" /></button>
             </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Content */}
-        {loading ? (
-          <div className="text-center py-12 text-zinc-400 text-sm">Cargando...</div>
-        ) : opps.length === 0 ? (
-          <div className="text-center py-16">
-            <svg className="w-10 h-10 mx-auto text-zinc-300 dark:text-zinc-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
-            <h3 className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">No hay oportunidades aun</h3>
-            <p className="text-xs text-zinc-400 mt-1 max-w-xs mx-auto">
-              Presiona <strong>"Escanear"</strong> arriba para rastrear las agencias y detectar grants, RFPs y fondos automaticamente.
-            </p>
-            {!isBusy && (
-              <button
-                onClick={onScan}
-                className="mt-4 text-xs bg-violet-600 text-white px-5 py-2 rounded-lg hover:bg-violet-700 font-medium"
-              >
-                Escanear Ahora
-              </button>
-            )}
-          </div>
+      {loading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map(i => <div key={i} className="h-28 rounded-[28px] bg-surface-container-low animate-pulse" />)}
+        </div>
+      ) : opps.length === 0 ? (
+        totalCount === 0 ? (
+          <EmptyState icon="search" text="Aún no hay fondos. Toca «Buscar fondos» para empezar.">
+            {!isBusy && <button type="button" onClick={onScan} className="btn btn-filled">Buscar ahora</button>}
+          </EmptyState>
         ) : (
-          <div className="space-y-2">
-            {opps.map(opp => (
-              <OpportunityCard key={opp.id} opp={opp} onReview={handleReview} onDelete={handleDeleteOpp} />
-            ))}
-          </div>
-        )}
-      </div>
+          <EmptyState icon="search" text="Nada con esos filtros.">
+            <button type="button" onClick={resetFilters} className="btn btn-tonal">Quitar filtros</button>
+          </EmptyState>
+        )
+      ) : (
+        <div className="stagger grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+          {opps.map(opp => (
+            <OpportunityCard key={opp.id} opp={opp} onReview={handleReview} onDelete={handleDeleteOpp} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
+function StatCard({ label, value, tone }: { label: string; value: number; tone: 'ok' | 'accent' | 'primary' }) {
+  const cls = tone === 'ok' ? 'bg-success-container text-on-success-container rounded-[28px_8px_28px_28px]'
+    : tone === 'accent' ? 'bg-tertiary-container text-on-tertiary-container rounded-[8px_28px_28px_28px]'
+    : 'bg-primary-container text-on-primary-container rounded-[28px_28px_8px_28px]';
   return (
-    <div className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
-      <div className={`text-xl font-bold ${color}`}>{value}</div>
-      <div className="text-[10px] text-zinc-500 dark:text-zinc-400">{label}</div>
+    <div className={`p-4 sm:p-5 ${cls}`}>
+      <div className="text-4xl sm:text-5xl font-extrabold leading-none tracking-tight">{value}</div>
+      <div className="text-sm font-bold mt-2">{label}</div>
     </div>
   );
 }
@@ -563,162 +471,111 @@ function OpportunityCard({ opp, onReview, onDelete }: { opp: Opportunity; onRevi
   };
 
   return (
-    <div
-      className={`bg-white dark:bg-zinc-800 border rounded-lg transition-all ${
-        expanded
-          ? 'border-violet-300 dark:border-violet-700 shadow-md'
-          : 'border-zinc-200 dark:border-zinc-700 hover:border-violet-200 dark:hover:border-violet-800'
-      }`}
-    >
-      {/* Clickable header */}
-      <div className="p-4 cursor-pointer" onClick={handleExpand}>
-        <div className="flex items-start gap-3">
-          <div className="flex-1 min-w-0">
-            {/* Badges */}
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full ${CATEGORY_COLORS[opp.category] || CATEGORY_COLORS.other}`}>
-                {CATEGORY_LABELS[opp.category] || opp.category}
-              </span>
-              <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full ${STATUS_COLORS[opp.status] || STATUS_COLORS.unknown} ${isClosing ? 'animate-pulse' : ''}`}>
-                {STATUS_LABELS[opp.status] || opp.status}
-              </span>
-              {opp.reviewed && (
-                <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                  Revisada
-                </span>
-              )}
-              {opp.confidence > 0 && (
-                <span className="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full bg-zinc-100 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
-                  {opp.confidence}%
-                </span>
-              )}
-            </div>
+    <div className={`bg-surface-container-low transition-[border-radius,background-color] duration-500 ease-[var(--spring)] ${expanded ? 'rounded-[32px]' : 'rounded-[28px] hover:rounded-[36px] hover:bg-surface-container'} ${isClosing ? 'ring-[3px] ring-tertiary' : ''}`}>
+      <div
+        className="p-5 cursor-pointer rounded-[inherit]"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={handleExpand}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleExpand(); } }}
+      >
+        <div className="flex flex-wrap gap-2 mb-3">
+          <span className={`tag !text-sm !px-3 ${CATEGORY_COLORS[opp.category] || CATEGORY_COLORS.other}`}>
+            {CATEGORY_LABELS[opp.category] || opp.category}
+          </span>
+          <span className={`tag !text-sm !px-3 ${STATUS_COLORS[opp.status] || STATUS_COLORS.unknown}`}>
+            {STATUS_LABELS[opp.status] || opp.status}
+          </span>
+          {opp.reviewed && <span className="tag tag-ok !text-sm !px-3">Revisada</span>}
+        </div>
 
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-tight">
-              {opp.title || 'Sin titulo'}
-            </h3>
-            {opp.agency && (
-              <p className="text-xs text-violet-600 dark:text-violet-400 mt-0.5">{opp.agency}</p>
-            )}
+        <h3 className="text-xl font-extrabold leading-tight tracking-tight">{opp.title || 'Sin título'}</h3>
+        {opp.agency && <p className="text-sm font-bold text-primary mt-1">{opp.agency}</p>}
 
-            {!expanded && opp.summary && (
-              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 line-clamp-1">{opp.summary}</p>
-            )}
+        {!expanded && opp.summary && (
+          <p className="text-sm text-on-surface-variant mt-2 line-clamp-2">{opp.summary}</p>
+        )}
 
-            <div className="flex flex-wrap gap-3 mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-              {opp.amount && (
-                <span className="text-green-600 dark:text-green-400 font-medium">{opp.amount}</span>
-              )}
-              {opp.deadline && (
-                <span className={isClosing ? 'text-red-600 dark:text-red-400 font-medium' : ''}>
-                  {formatDate(opp.deadline)} ({deadlineDays})
-                </span>
-              )}
-            </div>
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <div className="rounded-[20px] bg-surface-container-high px-4 py-3">
+            <div className="text-xs font-bold text-on-surface-variant">Monto</div>
+            <div className="text-lg font-extrabold leading-tight">{opp.amount || 'Sin monto'}</div>
           </div>
+          <div className={`rounded-[20px] px-4 py-3 ${isClosing ? 'bg-tertiary-container text-on-tertiary-container' : 'bg-surface-container-high'}`}>
+            <div className="text-xs font-bold opacity-80">Fecha límite</div>
+            <div className="text-lg font-extrabold leading-tight">{opp.deadline ? formatDate(opp.deadline) : 'Sin fecha'}</div>
+            {opp.deadline && <div className="text-xs font-bold">{deadlineDays}</div>}
+          </div>
+        </div>
 
-          <svg className={`w-4 h-4 text-zinc-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        <div className="flex justify-center mt-2 text-on-surface-variant" aria-hidden="true">
+          <svg className={`w-6 h-6 transition-transform duration-500 ease-[var(--spring)] ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </div>
       </div>
 
-      {/* Expanded: full detail + page content reader */}
       {expanded && (
-        <div className="border-t border-zinc-100 dark:border-zinc-700">
-          {/* Info section */}
-          <div className="px-4 py-3 space-y-3">
-            {opp.summary && (
-              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">{opp.summary}</p>
+        <div className="px-5 pb-5 space-y-4 animate-fade-in">
+          {opp.summary && <p className="text-sm text-on-surface leading-relaxed">{opp.summary}</p>}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            {opp.contact_name && (
+              <div><span className="font-bold text-on-surface-variant">Contacto:</span> {opp.contact_name}</div>
             )}
-
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {opp.contact_name && (
-                <div>
-                  <span className="text-zinc-400">Contacto:</span>{' '}
-                  <span className="text-zinc-700 dark:text-zinc-300">{opp.contact_name}</span>
-                </div>
-              )}
-              {opp.contact_email && (
-                <div>
-                  <span className="text-zinc-400">Email:</span>{' '}
-                  <button onClick={(e) => { e.stopPropagation(); openExternal(`mailto:${opp.contact_email}`); }}
-                    className="text-violet-600 dark:text-violet-400 hover:underline">
-                    {opp.contact_email}
-                  </button>
-                </div>
-              )}
-              {opp.source_url && (
-                <div className="col-span-2">
-                  <span className="text-zinc-400">Fuente:</span>{' '}
-                  <button onClick={(e) => { e.stopPropagation(); openExternal(opp.source_url); }}
-                    className="text-violet-600 dark:text-violet-400 hover:underline text-[11px] break-all">
-                    {opp.source_url}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-2">
-              {opp.source_url && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); openExternal(opp.source_url); }}
-                  className="text-xs bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700 font-medium flex items-center gap-1"
-                >
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                  Abrir en Navegador
+            {opp.contact_email && (
+              <div>
+                <span className="font-bold text-on-surface-variant">Correo:</span>{' '}
+                <button type="button" onClick={(e) => { e.stopPropagation(); openExternal(`mailto:${opp.contact_email}`); }} className="text-primary font-semibold underline !min-h-0 !min-w-0 break-all">
+                  {opp.contact_email}
                 </button>
-              )}
-              {!opp.reviewed && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onReview(opp.id); }}
-                  className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 font-medium"
-                >
-                  Marcar Revisada
-                </button>
-              )}
-              <button
-                onClick={(e) => { e.stopPropagation(); onDelete(opp.id); }}
-                className="text-xs bg-zinc-100 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 dark:bg-zinc-700 dark:text-red-400 dark:hover:bg-red-900/30 font-medium"
-              >
-                Eliminar
-              </button>
-            </div>
+              </div>
+            )}
           </div>
 
-          {/* Page content reader */}
-          <div className="border-t border-zinc-100 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/30">
-            <div className="px-4 py-2 flex items-center gap-2 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              Contenido de la pagina
-            </div>
-            <div className="px-4 pb-4 max-h-80 overflow-y-auto">
+          <div className="flex flex-wrap gap-2">
+            {opp.source_url && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); openExternal(opp.source_url); }} className="btn btn-filled btn-sm">
+                <Icon name="open" className="w-5 h-5" />Abrir página
+              </button>
+            )}
+            {!opp.reviewed && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); onReview(opp.id); }} className="btn btn-tonal btn-sm">
+                <Icon name="check" className="w-5 h-5" />Marcar revisada
+              </button>
+            )}
+            <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(opp.id); }} className="btn btn-danger btn-sm">
+              <Icon name="trash" className="w-5 h-5" />Quitar
+            </button>
+          </div>
+
+          <div className="rounded-[24px] bg-surface-container p-4">
+            <div className="title-md mb-2">Texto de la página</div>
+            <div className="max-h-80 overflow-y-auto">
               {loadingContent ? (
-                <div className="text-xs text-zinc-400 py-4 text-center">Cargando contenido...</div>
+                <div className="text-sm text-on-surface-variant py-4 text-center">Cargando...</div>
               ) : pageContent ? (
                 (() => {
                   const cleaned = cleanPageContent(pageContent);
                   return cleaned ? (
-                    <div className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+                    <div className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-wrap break-words">
                       {cleaned.slice(0, 5000)}
-                      {cleaned.length > 5000 && (
-                        <span className="text-zinc-400 italic block mt-2">... contenido truncado</span>
-                      )}
+                      {cleaned.length > 5000 && <span className="block mt-2 font-semibold">... texto recortado</span>}
                     </div>
                   ) : (
-                    <div className="text-xs text-zinc-400 py-4 text-center">
-                      Contenido no disponible en texto limpio.
+                    <div className="text-sm text-on-surface-variant py-4 text-center">
+                      No hay texto limpio.
                       {opp.source_url && (
-                        <button onClick={() => openExternal(opp.source_url)} className="ml-1 text-violet-500 underline">
-                          Ver en navegador
+                        <button type="button" onClick={() => openExternal(opp.source_url)} className="ml-1 text-primary underline font-semibold !min-h-0 !min-w-0">
+                          Abrir la página
                         </button>
                       )}
                     </div>
                   );
                 })()
               ) : (
-                <div className="text-xs text-zinc-400 py-4 text-center">Sin contenido disponible</div>
+                <div className="text-sm text-on-surface-variant py-4 text-center">Sin texto disponible</div>
               )}
             </div>
           </div>
@@ -728,7 +585,7 @@ function OpportunityCard({ opp, onReview, onDelete }: { opp: Opportunity; onRevi
   );
 }
 
-// ── Dominios Tab ───────────────────────────────────────────────────
+// ── Agencias ───────────────────────────────────────────────────────
 
 function DominiosTab({ domains, onDomainsChanged }: {
   domains: CrawlDomain[];
@@ -764,97 +621,62 @@ function DominiosTab({ domains, onDomainsChanged }: {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-            Agencias Configuradas ({domains.length})
-          </h3>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="text-xs bg-violet-500 text-white px-3 py-1.5 rounded hover:bg-violet-600"
-          >
-            {showForm ? 'Cancelar' : '+ Agregar Dominio'}
-          </button>
-        </div>
-
-        {showForm && (
-          <DomainForm onCreated={() => { setShowForm(false); onDomainsChanged(); }} />
-        )}
-
-        {domains.length === 0 ? (
-          <div className="text-center py-8 text-zinc-400 text-sm">No hay dominios. Agrega uno para comenzar.</div>
-        ) : (
-          <div className="space-y-2">
-            {domains.map(d => (
-              editingId === d.id ? (
-                <DomainEditRow key={d.id} domain={d} onSaved={() => { setEditingId(null); onDomainsChanged(); }} onCancel={() => setEditingId(null)} />
-              ) : (
-                <div key={d.id} className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${d.active ? 'bg-green-500' : 'bg-zinc-300'}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{d.label || d.domain}</div>
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {d.domain} &middot; {d.category} &middot; {d.page_count} pag
-                      {d.last_crawled_at && ` \u00b7 ${timeAgo(d.last_crawled_at)}`}
-                    </div>
-                  </div>
-                  <div className="flex gap-1 text-[10px] shrink-0">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleToggle(d.id, d.active); }}
-                      className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
-                    >
-                      {d.active ? 'Pausar' : 'Activar'}
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setEditingId(d.id); }}
-                      className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
-                    >
-                      Editar
-                    </button>
-                    {confirmDeleteId === d.id ? (
-                      <>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDelete(d.id); }}
-                          className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 font-semibold"
-                        >
-                          Confirmar
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                          className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
-                        >
-                          No
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(d.id); }}
-                        className="px-2 py-1 rounded bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100"
-                      >
-                        Eliminar
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )
-            ))}
-          </div>
-        )}
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="title-lg">Agencias ({domains.length})</h2>
+        <button type="button" onClick={() => setShowForm(!showForm)} className={showForm ? 'btn btn-soft' : 'btn btn-tonal'}>
+          {showForm ? 'Cancelar' : (<><Icon name="plus" className="w-5 h-5" />Agregar agencia</>)}
+        </button>
       </div>
 
-      {/* Recent Runs */}
+      {showForm && <DomainForm onCreated={() => { setShowForm(false); onDomainsChanged(); }} />}
+
+      {domains.length === 0 ? (
+        <EmptyState icon="globe" text="Aún no hay agencias. Agrega una para empezar." />
+      ) : (
+        <div className="seg-list">
+          {domains.map(d => (
+            editingId === d.id ? (
+              <DomainEditRow key={d.id} domain={d} onSaved={() => { setEditingId(null); onDomainsChanged(); }} onCancel={() => setEditingId(null)} />
+            ) : (
+              <div key={d.id} className="p-4 flex flex-wrap items-center gap-3">
+                <span className={`w-3 h-3 rounded-full shrink-0 ${d.active ? 'bg-success' : 'bg-outline'}`} title={d.active ? 'Activa' : 'En pausa'} />
+                <div className="flex-1 min-w-[180px]">
+                  <div className="title-md">{d.label || d.domain}</div>
+                  <div className="text-sm text-on-surface-variant">
+                    {d.domain} &middot; {d.category} &middot; {d.page_count} páginas
+                    {d.last_crawled_at && ` · ${timeAgo(d.last_crawled_at)}`}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); handleToggle(d.id, d.active); }} className="btn btn-soft btn-sm">
+                    {d.active ? 'Pausar' : 'Activar'}
+                  </button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setEditingId(d.id); }} className="btn btn-soft btn-sm">Editar</button>
+                  {confirmDeleteId === d.id ? (
+                    <>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); handleDelete(d.id); }} className="btn btn-filled btn-sm !bg-error !text-on-error">Sí, quitar</button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }} className="btn btn-soft btn-sm">No</button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(d.id); }} className="btn btn-danger btn-sm">Quitar</button>
+                  )}
+                </div>
+              </div>
+            )
+          ))}
+        </div>
+      )}
+
       {runs.length > 0 && (
-        <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
-          <h4 className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">Ejecuciones Recientes</h4>
-          <div className="space-y-1">
+        <div>
+          <h3 className="title-md mb-2">Búsquedas recientes</h3>
+          <div className="seg-list">
             {runs.slice(0, 5).map(run => (
-              <div key={run.id} className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  run.status === 'completed' ? 'bg-green-500' : run.status === 'running' ? 'bg-blue-500 animate-pulse' : 'bg-red-500'
-                }`} />
-                <span>{run.pages_crawled} pag, {run.pages_new} nuevas</span>
-                <span className="text-zinc-400">{timeAgo(run.started_at)}</span>
+              <div key={run.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+                <span className={`w-2.5 h-2.5 rounded-full ${run.status === 'completed' ? 'bg-success' : run.status === 'running' ? 'bg-primary animate-pulse' : 'bg-error'}`} />
+                <span className="font-semibold">{run.pages_crawled} páginas, {run.pages_new} nuevas</span>
+                <span className="ml-auto text-on-surface-variant">{timeAgo(run.started_at)}</span>
               </div>
             ))}
           </div>
@@ -888,35 +710,28 @@ function DomainForm({ onCreated }: { onCreated: () => void }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4 space-y-3">
-      <div className="grid grid-cols-2 gap-3">
+    <form onSubmit={handleSubmit} className="card space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-[10px] text-zinc-500 mb-0.5">Dominio *</label>
-          <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="www.ejemplo.gov"
-            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+          <label htmlFor="df-dom" className="field-label">Página de la agencia *</label>
+          <input id="df-dom" value={domain} onChange={e => setDomain(e.target.value)} placeholder="www.ejemplo.gov" className="field" />
         </div>
         <div>
-          <label className="block text-[10px] text-zinc-500 mb-0.5">Nombre</label>
-          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Agencia X"
-            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+          <label htmlFor="df-label" className="field-label">Nombre</label>
+          <input id="df-label" value={label} onChange={e => setLabel(e.target.value)} placeholder="Agencia X" className="field" />
         </div>
         <div>
-          <label className="block text-[10px] text-zinc-500 mb-0.5">Categoria</label>
-          <select value={category} onChange={e => setCategory(e.target.value)}
-            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200">
+          <label htmlFor="df-cat" className="field-label">Tipo</label>
+          <select id="df-cat" value={category} onChange={e => setCategory(e.target.value)} className="field font-semibold">
             {DOMAIN_CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-[10px] text-zinc-500 mb-0.5">Prioridad (1-10)</label>
-          <input type="number" min={1} max={10} value={priority} onChange={e => setPriority(+e.target.value)}
-            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+          <label htmlFor="df-pri" className="field-label">Prioridad (1 a 10)</label>
+          <input id="df-pri" type="number" min={1} max={10} value={priority} onChange={e => setPriority(+e.target.value)} className="field" />
         </div>
       </div>
-      <button type="submit" disabled={saving}
-        className="text-xs bg-violet-500 text-white px-4 py-1.5 rounded hover:bg-violet-600 disabled:opacity-50">
-        {saving ? 'Guardando...' : 'Crear Dominio'}
-      </button>
+      <button type="submit" disabled={saving} className="btn btn-filled">{saving ? 'Guardando...' : 'Crear agencia'}</button>
     </form>
   );
 }
@@ -942,27 +757,18 @@ function DomainEditRow({ domain, onSaved, onCancel }: { domain: CrawlDomain; onS
   };
 
   return (
-    <div className="bg-violet-50/50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 rounded-lg p-3 space-y-2">
-      <div className="text-xs font-medium text-violet-700 dark:text-violet-300">{domain.domain}</div>
-      <div className="grid grid-cols-3 gap-2">
-        <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Nombre"
-          className="text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
-        <select value={category} onChange={e => setCategory(e.target.value)}
-          className="text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 dark:text-zinc-200">
+    <div className="p-4 space-y-3 !bg-primary-container text-on-primary-container">
+      <div className="title-md">{domain.domain}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Nombre" aria-label="Nombre" className="field" />
+        <select value={category} onChange={e => setCategory(e.target.value)} aria-label="Tipo" className="field font-semibold">
           {DOMAIN_CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <input type="number" value={priority} onChange={e => setPriority(+e.target.value)} min={1} max={10}
-          className="text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+        <input type="number" value={priority} onChange={e => setPriority(+e.target.value)} min={1} max={10} aria-label="Prioridad" className="field" />
       </div>
       <div className="flex gap-2">
-        <button onClick={handleSave} disabled={saving}
-          className="text-[10px] bg-violet-500 text-white px-3 py-1 rounded hover:bg-violet-600 disabled:opacity-50">
-          {saving ? 'Guardando...' : 'Guardar'}
-        </button>
-        <button onClick={onCancel}
-          className="text-[10px] bg-zinc-200 text-zinc-600 px-3 py-1 rounded hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600">
-          Cancelar
-        </button>
+        <button type="button" onClick={handleSave} disabled={saving} className="btn btn-filled btn-sm">{saving ? 'Guardando...' : 'Guardar'}</button>
+        <button type="button" onClick={onCancel} className="btn btn-soft btn-sm">Cancelar</button>
       </div>
     </div>
   );

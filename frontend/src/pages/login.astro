@@ -1,6 +1,8 @@
 ---
+import { ViewTransitions } from 'astro:transitions';
 import '../styles/global.css';
 import LoginForm from '../islands/LoginForm';
+import ThemeToggle from '../islands/ThemeToggle';
 ---
 
 <!doctype html>
@@ -10,44 +12,60 @@ import LoginForm from '../islands/LoginForm';
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Folio" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,100..1000&display=swap" rel="stylesheet" />
     <title>Entrar | Folio</title>
 
     <script is:inline>
       (function () {
-        const theme = localStorage.getItem('theme');
-        if (theme === 'light') {
-          document.documentElement.classList.remove('dark');
-        } else {
-          document.documentElement.classList.add('dark');
+        function dark() {
+          try { return localStorage.getItem('theme') !== 'light'; } catch (e) { return true; }
+        }
+        document.documentElement.classList.toggle('dark', dark());
+        if (!window.__folioTheme) {
+          window.__folioTheme = true;
+          document.addEventListener('astro:before-swap', function (e) {
+            e.newDocument.documentElement.classList.toggle('dark', dark());
+          });
         }
       })();
     </script>
+    <ViewTransitions />
   </head>
 
-  <body
-    class="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 transition-theme"
-  >
-    <div class="w-full max-w-sm px-4">
-      <!-- Logo -->
-      <div class="text-center mb-8">
-        <h1 class="text-3xl font-bold text-zinc-900 dark:text-zinc-100">
-          Folio
-        </h1>
-        <p class="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-          Lo que salió de tus marcas y los fondos abiertos.
-        </p>
-      </div>
-
-      <!-- Login card -->
-      <div
-        class="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm dark:shadow-none"
-      >
-        <LoginForm client:load />
-      </div>
-
-      <p class="mt-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
-        Folio
-      </p>
+  <body class="min-h-screen overflow-x-hidden">
+    <div class="fixed top-4 right-4 z-10">
+      <ThemeToggle client:load />
     </div>
+
+    <main class="min-h-screen flex items-center justify-center px-4 py-10 relative">
+      <!-- Formas de fondo -->
+      <div aria-hidden="true" class="pointer-events-none absolute inset-0 overflow-hidden">
+        <div class="blob-a absolute -top-24 -left-20 w-72 h-72 bg-primary-container opacity-70"></div>
+        <div class="blob-b absolute -bottom-28 -right-16 w-80 h-80 bg-tertiary-container opacity-70"></div>
+      </div>
+
+      <div class="relative w-full max-w-sm page-in">
+        <div class="mb-8 text-center">
+          <span class="logo-mark mx-auto mb-5 !w-16 !h-16 !text-3xl !rounded-[22px_22px_22px_6px]" aria-hidden="true">F</span>
+          <h1 class="title-xl">Folio</h1>
+          <p class="mt-3 text-base text-on-surface-variant">
+            Lo que salió de tus marcas y los fondos abiertos.
+          </p>
+        </div>
+
+        <div class="card p-6 sm:p-7 !rounded-[36px_36px_36px_10px]">
+          <LoginForm client:load />
+        </div>
+      </div>
+    </main>
+
+    <style>
+      .blob-a { border-radius: 58% 42% 63% 37% / 45% 55% 45% 55%; animation: login-blob 9s ease-in-out infinite alternate; }
+      .blob-b { border-radius: 40% 60% 35% 65% / 60% 40% 60% 40%; animation: login-blob 11s ease-in-out infinite alternate-reverse; }
+      @keyframes login-blob { to { transform: translate(18px, 24px) rotate(14deg) scale(1.08); border-radius: 50% 50% 60% 40% / 40% 60% 40% 60%; } }
+      @media (prefers-reduced-motion: reduce) { .blob-a, .blob-b { animation: none; } }
+    </style>
   </body>
 </html>

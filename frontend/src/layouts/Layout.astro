@@ -1,4 +1,5 @@
 ---
+import { ViewTransitions } from 'astro:transitions';
 import ThemeToggle from '../islands/ThemeToggle';
 import '../styles/global.css';
 
@@ -8,6 +9,17 @@ interface Props {
 }
 
 const { title = 'Folio', activeNav } = Astro.props;
+
+const icons: Record<string, string> = {
+  inbox: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-17.399 0V5.25A2.25 2.25 0 014.5 3h15a2.25 2.25 0 012.25 2.25v8.25m-17.399 0l-.97 4.843A1.5 1.5 0 004.873 21h14.254a1.5 1.5 0 001.49-1.707l-.97-4.843" /></svg>',
+  bookmark: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" /></svg>',
+  archive: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>',
+  eye: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
+  gear: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
+  globe: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>',
+  out: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>',
+  search: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>',
+};
 
 const navItems = [
   { href: '/inbox', label: 'Inbox', key: 'inbox' as const, badge: false, icon: 'inbox' },
@@ -26,161 +38,125 @@ const navItems = [
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Folio" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,100..1000&display=swap" rel="stylesheet" />
     <title>{title} | Folio</title>
 
-    <!-- Prevent flash of wrong theme -->
+    <!-- Tema sin parpadeo, también entre páginas -->
     <script is:inline>
       (function () {
-        const theme = localStorage.getItem('theme');
-        if (theme === 'light') {
-          document.documentElement.classList.remove('dark');
-        } else {
-          document.documentElement.classList.add('dark');
+        function dark() {
+          try { return localStorage.getItem('theme') !== 'light'; } catch (e) { return true; }
+        }
+        document.documentElement.classList.toggle('dark', dark());
+        if (!window.__folioTheme) {
+          window.__folioTheme = true;
+          document.addEventListener('astro:before-swap', function (e) {
+            e.newDocument.documentElement.classList.toggle('dark', dark());
+          });
         }
       })();
     </script>
+    <ViewTransitions />
   </head>
 
-  <body class="min-h-screen flex">
-    <!-- Sidebar -->
-    <aside
-      class="sidebar fixed top-0 left-0 h-screen w-[220px] flex flex-col z-50 border-r transition-theme"
-      id="sidebar"
-    >
-      <!-- Logo -->
-      <div class="px-5 pt-6 pb-4">
-        <a href="/inbox" class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center">
-            <span class="text-white font-bold text-sm">F</span>
-          </div>
-          <span class="font-semibold text-[15px] tracking-tight sidebar-text">Folio</span>
-        </a>
-      </div>
+  <body class="min-h-screen">
+    <!-- Riel de navegación (escritorio) -->
+    <aside class="rail" id="sidebar">
+      <a href="/inbox" class="flex items-center gap-3 px-3 pt-2 pb-5" aria-label="Folio, ir al Inbox">
+        <span class="logo-mark" aria-hidden="true">F</span>
+        <span class="title-lg">Folio</span>
+      </a>
 
-      <!-- Search -->
-      <div class="px-3 pb-3">
+      <form action="/archive" method="get" class="px-1 pb-3" role="search" id="nav-search-form">
+        <label class="sr-only" for="nav-search">Buscar</label>
         <div class="relative">
-          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sidebar-icon-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Buscar..."
-            class="w-full pl-8 pr-3 py-2 text-xs sidebar-search rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-500 transition-all"
-            id="nav-search"
-          />
+          <span class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-on-surface-variant pointer-events-none [&>svg]:w-full [&>svg]:h-full" set:html={icons.search} />
+          <input type="search" name="q" id="nav-search" placeholder="Buscar" class="field pl-12" autocomplete="off" />
         </div>
-      </div>
+      </form>
 
-      <!-- Nav -->
-      <nav class="flex-1 overflow-y-auto px-3 sidebar-scroll">
-        <div class="space-y-0.5">
-          {navItems.map((item) => (
-            <a
-              href={item.href}
-              id={item.badge ? 'vigilancia-nav' : undefined}
-              class:list={[
-                'sidebar-item group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-all',
-                activeNav === item.key ? 'sidebar-item-active' : 'sidebar-item-inactive',
-              ]}
-            >
-              <span class="sidebar-icon w-4 h-4 shrink-0" data-icon={item.icon}></span>
-              <span class="truncate">{item.label}</span>
-              {item.badge && (
-                <span
-                  id="vigilancia-badge"
-                  class="hidden ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-red-500 text-white"
-                />
-              )}
-            </a>
-          ))}
-        </div>
+      <nav class="flex-1 overflow-y-auto flex flex-col gap-1" aria-label="Principal">
+        {navItems.map((item) => (
+          <a href={item.href} class="nav-item" aria-current={activeNav === item.key ? 'page' : undefined}>
+            <Fragment set:html={icons[item.icon]} />
+            <span class="truncate">{item.label}</span>
+            {item.badge && <span class="nav-badge hidden ml-auto vig-badge" />}
+          </a>
+        ))}
       </nav>
 
-      <!-- Bottom actions -->
-      <div class="px-3 pb-4 pt-2 space-y-0.5 border-t sidebar-border mt-auto">
-        <button
-          type="button"
-          id="logout-btn"
-          class="sidebar-item sidebar-item-inactive w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-all"
-        >
-          <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-          </svg>
+      <div class="flex items-center gap-2 pt-3">
+        <button type="button" class="nav-item logout-btn flex-1" aria-label="Cerrar sesión">
+          <Fragment set:html={icons.out} />
           <span>Cerrar sesión</span>
         </button>
-
-        <div class="flex items-center px-2.5 py-2">
-          <ThemeToggle client:load />
-        </div>
+        <ThemeToggle client:load />
       </div>
     </aside>
 
-    <!-- Main content -->
-    <main class="flex-1 ml-[220px] min-h-screen">
-      <div class="max-w-[1200px] mx-auto px-6 py-6">
+    <!-- Barra superior (celular) -->
+    <header class="lg:hidden flex items-center justify-between gap-2 px-4 pt-3">
+      <a href="/inbox" class="flex items-center gap-2.5" aria-label="Folio, ir al Inbox">
+        <span class="logo-mark" aria-hidden="true">F</span>
+        <span class="title-lg">Folio</span>
+      </a>
+      <div class="flex items-center gap-1">
+        <a href="/archive" class="icon-btn" aria-label="Buscar"><span class="w-6 h-6 [&>svg]:w-full [&>svg]:h-full" set:html={icons.search} /></a>
+        <ThemeToggle client:load />
+        <button type="button" class="icon-btn logout-btn" aria-label="Cerrar sesión" title="Cerrar sesión"><span class="w-6 h-6 [&>svg]:w-full [&>svg]:h-full" set:html={icons.out} /></button>
+      </div>
+    </header>
+
+    <main class="app-main min-h-screen pb-32 lg:pb-10">
+      <div class="max-w-[1200px] mx-auto px-4 sm:px-6 pt-5 lg:pt-8">
         <slot />
       </div>
     </main>
 
-    <!-- Inject nav icons + handlers -->
-    <script is:inline>
-      // SVG icons for nav items
-      const icons = {
-        inbox: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-17.399 0V5.25A2.25 2.25 0 014.5 3h15a2.25 2.25 0 012.25 2.25v8.25m-17.399 0l-.97 4.843A1.5 1.5 0 004.873 21h14.254a1.5 1.5 0 001.49-1.707l-.97-4.843" /></svg>',
-        bookmark: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" /></svg>',
-        archive: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>',
-        eye: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
-        gear: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
-        globe: '<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>',
-      };
+    <!-- Barra inferior (celular) -->
+    <nav class="bottom-bar" aria-label="Principal">
+      {navItems.map((item) => (
+        <a href={item.href} class="bottom-item" aria-current={activeNav === item.key ? 'page' : undefined}>
+          <span class="pill">
+            <Fragment set:html={icons[item.icon]} />
+            {item.badge && <span class="nav-badge hidden vig-badge" />}
+          </span>
+          <span class="truncate max-w-full">{item.label}</span>
+        </a>
+      ))}
+    </nav>
 
-      // Inject SVG icons into nav items
-      document.querySelectorAll('.sidebar-icon[data-icon]').forEach(el => {
-        const key = el.getAttribute('data-icon');
-        if (key && icons[key]) {
-          el.innerHTML = icons[key];
-          el.querySelector('svg').classList.add('w-4', 'h-4');
-        }
-      });
+    <script is:inline data-astro-rerun>
+      (function () {
+        document.querySelectorAll('.logout-btn').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } catch (e) {}
+            window.location.href = '/login';
+          });
+        });
 
-      // Navigate to archive search on Enter in nav search
-      document.getElementById('nav-search')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          const q = e.target.value.trim();
-          if (q) {
-            window.location.href = `/archive?q=${encodeURIComponent(q)}`;
-          }
-        }
-      });
-
-      // Cerrar sesión
-      document.getElementById('logout-btn')?.addEventListener('click', async () => {
-        try {
-          await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
-        } catch (e) { /* ignore */ }
-        window.location.href = '/login';
-      });
-
-      // Watchlist badge polling
-      (async function pollUnseen() {
-        try {
-          const res = await fetch('/api/watchlist/hits/unseen', { credentials: 'same-origin' });
-          if (res.ok) {
-            const data = await res.json();
-            const badge = document.getElementById('vigilancia-badge');
-            const nav = document.getElementById('vigilancia-nav');
-            if (badge) {
-              if (data.unseen > 0) {
-                badge.textContent = data.unseen > 99 ? '99+' : String(data.unseen);
-                badge.classList.remove('hidden');
-              } else {
-                badge.classList.add('hidden');
-              }
+        async function pollUnseen() {
+          try {
+            const res = await fetch('/api/watchlist/hits/unseen', { credentials: 'same-origin' });
+            if (res.ok) {
+              const data = await res.json();
+              document.querySelectorAll('.vig-badge').forEach(function (badge) {
+                if (data.unseen > 0) {
+                  badge.textContent = data.unseen > 99 ? '99+' : String(data.unseen);
+                  badge.classList.remove('hidden');
+                } else {
+                  badge.classList.add('hidden');
+                }
+              });
             }
-          }
-        } catch (e) { /* ignore */ }
-        setTimeout(pollUnseen, 60000);
+          } catch (e) {}
+        }
+        pollUnseen();
+        if (!window.__folioPoll) {
+          window.__folioPoll = setInterval(pollUnseen, 60000);
+        }
       })();
     </script>
   </body>

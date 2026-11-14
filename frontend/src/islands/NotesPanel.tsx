@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, type Note } from '../lib/api';
 import { timeAgo } from '../lib/utils';
+import { Icon } from './ui';
 
 interface NotesPanelProps {
   articleId: string;
@@ -56,82 +57,56 @@ export default function NotesPanel({ articleId }: NotesPanelProps) {
   };
 
   return (
-    <div className="space-y-3">
-      <h4 className="text-xs font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-        Notes ({notes.length})
-      </h4>
+    <section className="space-y-3" aria-label="Notas">
+      <h4 className="title-md">Notas ({notes.length})</h4>
 
-      {/* Add note form */}
       <form onSubmit={handleSubmit} className="flex gap-2">
         <input
           type="text"
           value={newNote}
           onChange={(e) => setNewNote(e.target.value)}
-          placeholder="Add a note..."
-          className="flex-1 px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors"
+          placeholder="Escribe una nota"
+          aria-label="Escribe una nota"
+          className="field flex-1"
           disabled={submitting}
         />
-        <button
-          type="submit"
-          disabled={submitting || !newNote.trim()}
-          className="px-3 py-2 text-sm font-medium text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
-        >
-          {submitting ? '...' : 'Add'}
+        <button type="submit" disabled={submitting || !newNote.trim()} className="btn btn-tonal">
+          {submitting ? '...' : 'Agregar'}
         </button>
       </form>
 
-      {error && (
-        <p className="text-xs text-red-500">{error}</p>
-      )}
+      {error && <p role="alert" className="text-sm font-semibold text-error">{error}</p>}
 
-      {/* Notes list */}
       {loading ? (
         <div className="space-y-2">
-          <div className="h-8 bg-zinc-200 dark:bg-zinc-800 rounded animate-pulse" />
-          <div className="h-8 bg-zinc-200 dark:bg-zinc-800 rounded animate-pulse" />
+          <div className="h-12 bg-surface-container-high rounded-2xl animate-pulse" />
+          <div className="h-12 bg-surface-container-high rounded-2xl animate-pulse" />
         </div>
       ) : notes.length === 0 ? (
-        <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">
-          No notes yet.
+        <p className="flex items-center gap-2 text-sm text-on-surface-variant">
+          <Icon name="note" className="w-5 h-5" /> Aún no hay notas.
         </p>
       ) : (
-        <div className="space-y-2">
+        <div className="seg-list">
           {notes.map((note) => (
-            <div
-              key={note.id}
-              className="group flex items-start gap-2 p-2.5 rounded-lg bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800"
-            >
-              <p className="flex-1 text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
-                {note.content}
-              </p>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                  {timeAgo(note.created_at)}
-                </span>
-                <button
-                  onClick={() => handleDelete(note.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-500 transition-all"
-                  title="Delete note"
-                >
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
+            <div key={note.id} className="flex items-start gap-2 pl-4 pr-1 py-2">
+              <div className="flex-1 min-w-0 py-1.5">
+                <p className="text-sm text-on-surface leading-relaxed break-words">{note.content}</p>
+                <span className="text-xs font-semibold text-on-surface-variant">{timeAgo(note.created_at)}</span>
               </div>
+              <button
+                type="button"
+                onClick={() => handleDelete(note.id)}
+                className="icon-btn shrink-0"
+                title="Borrar nota"
+                aria-label="Borrar nota"
+              >
+                <Icon name="close" className="w-5 h-5" />
+              </button>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }

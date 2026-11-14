@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, type WatchlistOrg, type WatchlistHit } from '../lib/api';
+import { Icon, Spinner, EmptyState, Modal } from './ui';
 
 const SOURCE_TYPES = [
   { key: 'all', label: 'Todos' },
@@ -16,17 +17,17 @@ function timeAgo(dateStr: string): string {
   const diff = now - then;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'ahora';
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return `hace ${mins} min`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
+  if (hrs < 24) return `hace ${hrs} h`;
   const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d`;
-  return `${Math.floor(days / 30)}mo`;
+  if (days < 30) return `hace ${days} d`;
+  return `hace ${Math.floor(days / 30)} m`;
 }
 
 // ── SVG Source Icons ─────────────────────────────────────────────
 
-function SourceIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
+function SourceIcon({ type, className = 'w-5 h-5' }: { type: string; className?: string }) {
   switch (type) {
     case 'google_news':
       return (
@@ -288,363 +289,187 @@ export default function WatchlistManager() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex items-center justify-center py-20 text-primary">
+        <Spinner className="w-8 h-8" />
       </div>
     );
   }
 
+  const closeOrgModal = () => { setShowAddOrg(false); setEditingOrg(null); };
+
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Vigilancia</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Monitoreo de organizaciones y coordinacion de respuestas</p>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="title-xl">Vigilancia</h1>
+          {unseenCount > 0 && <span className="tag tag-accent !text-sm !px-3.5 !py-1.5">{unseenCount} sin leer</span>}
         </div>
-        <div className="flex items-center gap-2">
-          {/* RSS button */}
-          <button
-            onClick={handleShowRSS}
-            className="p-2.5 text-orange-500 hover:bg-orange-500/10 rounded-sm transition-colors"
-            title="Feed RSS"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6.18 15.64a2.18 2.18 0 010 4.36 2.18 2.18 0 010-4.36zM4 4.44A15.56 15.56 0 0119.56 20h-2.83A12.73 12.73 0 004 7.27V4.44zm0 5.66a9.9 9.9 0 019.9 9.9h-2.83A7.07 7.07 0 004 12.93V10.1z" />
-            </svg>
-          </button>
-          {/* Scan button */}
-          <button
-            onClick={handleTriggerScan}
-            disabled={scanning || orgs.length === 0}
-            className="px-5 py-2.5 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600 text-white rounded-sm transition-colors flex items-center gap-2 shadow-lg shadow-emerald-500/20"
-          >
-            {scanning ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Escaneando...
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                </svg>
-                Buscar ahora
-              </>
-            )}
-          </button>
-        </div>
+        <button type="button" onClick={handleShowRSS} className="btn btn-soft btn-sm" title="Feed RSS">
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.18 15.64a2.18 2.18 0 010 4.36 2.18 2.18 0 010-4.36zM4 4.44A15.56 15.56 0 0119.56 20h-2.83A12.73 12.73 0 004 7.27V4.44zm0 5.66a9.9 9.9 0 019.9 9.9h-2.83A7.07 7.07 0 004 12.93V10.1z" />
+          </svg>
+          Feed RSS
+        </button>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6 min-h-[calc(100vh-12rem)]">
-        {/* Left panel: Org list */}
-        <div className="w-full lg:w-72 shrink-0 space-y-2">
-          <div className="flex items-center justify-between px-1">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-              Organizaciones ({orgs.length})
-            </h3>
-            <button
-              onClick={() => { resetForm(); setEditingOrg(null); setShowAddOrg(true); }}
-              className="px-2 py-1 text-[10px] font-semibold text-indigo-500 hover:bg-indigo-500/10 rounded-md transition-colors"
-            >
-              + Agregar
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Organizaciones */}
+        <div className="w-full lg:w-80 shrink-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="title-lg">Organizaciones ({orgs.length})</h2>
+            <button type="button" onClick={() => { resetForm(); setEditingOrg(null); setShowAddOrg(true); }} className="btn btn-tonal btn-sm">
+              <Icon name="plus" className="w-5 h-5" />Agregar
             </button>
           </div>
 
-          {orgs.length === 0 && (
-            <div className="p-4 rounded-sm border border-dashed border-zinc-300 dark:border-zinc-700 text-center">
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Sin organizaciones</p>
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">Agrega una para comenzar el monitoreo</p>
+          {orgs.length === 0 ? (
+            <EmptyState icon="eye" text="Agrega una organización para empezar a vigilar." />
+          ) : (
+            <div className="seg-list">
+              {orgs.map(org => (
+                <div
+                  key={org.id}
+                  className={`p-4 cursor-pointer ${selectedOrg === org.id ? '!bg-primary-container text-on-primary-container' : ''}`}
+                  onClick={() => setSelectedOrg(selectedOrg === org.id ? null : org.id)}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selectedOrg === org.id}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedOrg(selectedOrg === org.id ? null : org.id); } }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`w-3 h-3 rounded-full shrink-0 ${org.active ? 'bg-success' : 'bg-outline'}`} title={org.active ? 'Activa' : 'En pausa'} />
+                      <span className="title-md truncate">{org.name}</span>
+                    </div>
+                    <div className="flex items-center shrink-0 -mr-2">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); startEdit(org); }} className="icon-btn" title="Editar" aria-label={`Editar ${org.name}`}>
+                        <Icon name="note" className="w-5 h-5" />
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleOrg(org.id, org.active); }} className="icon-btn" title={org.active ? 'Pausar' : 'Activar'} aria-label={`${org.active ? 'Pausar' : 'Activar'} ${org.name}`}>
+                        {org.active ? (
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9v6m-4.5 0V9M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        ) : (
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" /></svg>
+                        )}
+                      </button>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); if (confirm(`¿Quitar a ${org.name}?`)) handleDeleteOrg(org.id); }} className="icon-btn hover:text-error" title="Quitar" aria-label={`Quitar ${org.name}`}>
+                        <Icon name="trash" className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap text-xs font-semibold opacity-80">
+                    <span>{org.keywords.length} palabras clave</span>
+                    {org.youtube_channels.length > 0 && <span>{org.youtube_channels.length} canales</span>}
+                    {org.website && (
+                      <span className="truncate max-w-[140px]" title={org.website}>
+                        {org.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-
-          {orgs.map(org => (
-            <div
-              key={org.id}
-              onClick={() => setSelectedOrg(selectedOrg === org.id ? null : org.id)}
-              className={`group p-3 rounded-sm border cursor-pointer transition-all ${
-                selectedOrg === org.id
-                  ? 'border-indigo-500 bg-indigo-500/5 dark:bg-indigo-500/10'
-                  : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 bg-white dark:bg-zinc-900'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${org.active ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
-                  <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{org.name}</span>
-                </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startEdit(org); }}
-                    className="p-1 text-zinc-400 hover:text-indigo-500 transition-colors"
-                    title="Editar"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleToggleOrg(org.id, org.active); }}
-                    className="p-1 text-zinc-400 hover:text-amber-500 transition-colors"
-                    title={org.active ? 'Desactivar' : 'Activar'}
-                  >
-                    {org.active ? (
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9v6m-4.5 0V9M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    ) : (
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
-                      </svg>
-                    )}
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteOrg(org.id); }}
-                    className="p-1 text-zinc-400 hover:text-red-500 transition-colors"
-                    title="Eliminar"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-                  {org.keywords.length} palabras clave
-                </span>
-                {org.youtube_channels.length > 0 && (
-                  <span className="text-[10px] text-red-400">{org.youtube_channels.length} YT</span>
-                )}
-                {org.website && (
-                  <span className="text-[10px] text-emerald-500 truncate max-w-[120px]" title={org.website}>
-                    {org.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
         </div>
 
-        {/* Right panel: Hits feed */}
-        <div className="flex-1 min-w-0 space-y-3">
-          {/* Filter bar — newspaper tab style */}
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-1 overflow-x-auto">
+        {/* Menciones */}
+        <div className="flex-1 min-w-0 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="chip-row chip-scroll" role="group" aria-label="Origen">
               {SOURCE_TYPES.map(st => (
-                <button
-                  key={st.key}
-                  onClick={() => setSourceFilter(st.key)}
-                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider rounded-sm whitespace-nowrap transition-colors ${
-                    sourceFilter === st.key
-                      ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900'
-                      : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                  }`}
-                >
+                <button key={st.key} type="button" onClick={() => setSourceFilter(st.key)} className="chip" aria-pressed={sourceFilter === st.key}>
                   {st.label}
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2">
-              {unseenCount > 0 && (
-                <span className="text-xs text-red-500 font-bold">{unseenCount} sin leer</span>
-              )}
-              <button
-                onClick={handleMarkAllSeen}
-                className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-700 rounded-sm transition-colors"
-              >
-                Marcar todo leido
+            {unseenCount > 0 && (
+              <button type="button" onClick={handleMarkAllSeen} className="btn btn-text btn-sm">
+                <Icon name="check" className="w-5 h-5" />Marcar todo leído
               </button>
-            </div>
+            )}
           </div>
 
-          {/* Hits list */}
           {hitsLoading ? (
-            <div className="flex justify-center py-10">
-              <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            </div>
+            <div className="flex justify-center py-10 text-primary"><Spinner className="w-7 h-7" /></div>
           ) : hits.length === 0 ? (
-            <div className="text-center py-16">
-              <svg className="w-10 h-10 mx-auto mb-3 text-zinc-300 dark:text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-              </svg>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                {orgs.length === 0
-                  ? 'Agrega una organizacion para comenzar el monitoreo'
-                  : 'Sin menciones encontradas. Los agentes escanean cada 6 horas.'}
-              </p>
-            </div>
+            <EmptyState
+              icon="eye"
+              text={orgs.length === 0 ? 'Agrega una organización para empezar.' : 'Aún no hay menciones. Toca «Buscar ahora».'}
+            />
           ) : (
-            <div className="space-y-2">
+            <div className="stagger grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
               {hits.map(hit => (
-                <HitCard
-                  key={hit.id}
-                  hit={hit}
-                  onMarkSeen={() => handleMarkSeen(hit.id)}
-                  onDelete={() => handleDeleteHit(hit.id)}
-                />
+                <HitCard key={hit.id} hit={hit} onMarkSeen={() => handleMarkSeen(hit.id)} onDelete={() => handleDeleteHit(hit.id)} />
               ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* Add/Edit Org Modal */}
+      {/* La acción principal */}
+      <div className="fab-slot">
+        <button type="button" onClick={handleTriggerScan} disabled={scanning || orgs.length === 0} className="fab disabled:opacity-50">
+          {scanning ? <Spinner className="w-6 h-6" /> : <Icon name="search" className="w-6 h-6" />}
+          {scanning ? 'Buscando...' : 'Buscar ahora'}
+        </button>
+      </div>
+
       {showAddOrg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { setShowAddOrg(false); setEditingOrg(null); }} />
-          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-2xl animate-fade-in">
-            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
-              {editingOrg ? 'Editar organizacion' : 'Nueva organizacion'}
-            </h3>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">Nombre</label>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={e => setFormName(e.target.value)}
-                  placeholder="ej. Vimenti"
-                  className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                  Pagina web <span className="text-zinc-400">(se usara para extraer palabras clave)</span>
-                </label>
-                <input
-                  type="url"
-                  value={formWebsite}
-                  onChange={e => setFormWebsite(e.target.value)}
-                  placeholder="ej. https://www.projectmakerspr.org/"
-                  className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                  Palabras clave <span className="text-zinc-400">(separadas por coma — se autoextraen del website)</span>
-                </label>
-                <textarea
-                  value={formKeywords}
-                  onChange={e => setFormKeywords(e.target.value)}
-                  placeholder="ej. Vimenti, educacion, ninos, afterschool"
-                  rows={3}
-                  className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                />
-                {formKeywords && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {formKeywords.split(',').map(k => k.trim()).filter(Boolean).map((kw, i) => (
-                      <span key={i} className="px-2 py-0.5 text-[10px] rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-medium">
-                        {kw}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1">
-                  Canales de YouTube <span className="text-zinc-400">(IDs, uno por linea)</span>
-                </label>
-                <textarea
-                  value={formYouTube}
-                  onChange={e => setFormYouTube(e.target.value)}
-                  placeholder="ej. UCxxxxxxxxxxxxxx"
-                  rows={2}
-                  className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                />
-              </div>
+        <Modal title={editingOrg ? 'Editar organización' : 'Nueva organización'} onClose={closeOrgModal}>
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="wo-name" className="field-label">Nombre</label>
+              <input id="wo-name" type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej. Vimenti" className="field" autoFocus />
             </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                onClick={() => { setShowAddOrg(false); setEditingOrg(null); }}
-                className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleSaveOrg}
-                disabled={!formName.trim()}
-                className="px-4 py-2 text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white rounded-lg transition-colors"
-              >
-                {editingOrg ? 'Guardar' : 'Crear'}
-              </button>
+            <div>
+              <label htmlFor="wo-web" className="field-label">Página web</label>
+              <input id="wo-web" type="url" value={formWebsite} onChange={e => setFormWebsite(e.target.value)} placeholder="https://www.ejemplo.org/" className="field" />
+            </div>
+            <div>
+              <label htmlFor="wo-kw" className="field-label">Palabras clave (separadas por coma)</label>
+              <textarea id="wo-kw" value={formKeywords} onChange={e => setFormKeywords(e.target.value)} placeholder="Vimenti, educación, niños" rows={3} className="field" />
+              {formKeywords && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {formKeywords.split(',').map(k => k.trim()).filter(Boolean).map((kw, i) => (
+                    <span key={i} className="tag tag-primary">{kw}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <label htmlFor="wo-yt" className="field-label">Canales de YouTube (uno por línea)</label>
+              <textarea id="wo-yt" value={formYouTube} onChange={e => setFormYouTube(e.target.value)} placeholder="UCxxxxxxxxxxxxxx" rows={2} className="field" />
             </div>
           </div>
-        </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" onClick={closeOrgModal} className="btn btn-text">Cancelar</button>
+            <button type="button" onClick={handleSaveOrg} disabled={!formName.trim()} className="btn btn-filled">{editingOrg ? 'Guardar' : 'Crear'}</button>
+          </div>
+        </Modal>
       )}
 
-      {/* RSS Feed Modal */}
       {showRSSModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowRSSModal(false)} />
-          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-2xl animate-fade-in">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-orange-500/10 rounded-sm">
-                <svg className="w-5 h-5 text-orange-500" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6.18 15.64a2.18 2.18 0 010 4.36 2.18 2.18 0 010-4.36zM4 4.44A15.56 15.56 0 0119.56 20h-2.83A12.73 12.73 0 004 7.27V4.44zm0 5.66a9.9 9.9 0 019.9 9.9h-2.83A7.07 7.07 0 004 12.93V10.1z" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Feed RSS</h3>
-            </div>
-
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
-              Suscribete a este feed RSS en cualquier lector (Feedly, Thunderbird, NetNewsWire) para recibir las menciones automaticamente.
-            </p>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                readOnly
-                value={feedURL}
-                className="flex-1 px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-sm text-zinc-900 dark:text-zinc-100 font-mono text-[11px] select-all"
-                onFocus={e => e.target.select()}
-              />
-              <button
-                onClick={handleCopyFeedURL}
-                className={`px-3 py-2 text-sm font-medium rounded-sm transition-colors ${
-                  feedCopied
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-zinc-800 hover:bg-indigo-600 text-white'
-                }`}
-              >
-                {feedCopied ? 'Copiado' : 'Copiar'}
-              </button>
-            </div>
-
-            <div className="mt-3">
-              <button
-                onClick={handleRegenerateFeed}
-                disabled={regenerating}
-                className="text-xs text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-50 transition-colors"
-              >
-                {regenerating ? 'Regenerando...' : 'Regenerar token'}
-              </button>
-              <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                Esto invalidara el URL anterior.
-              </p>
-            </div>
-
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => setShowRSSModal(false)}
-                className="px-4 py-2 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 transition-colors"
-              >
-                Cerrar
-              </button>
-            </div>
+        <Modal title="Feed RSS" onClose={() => setShowRSSModal(false)}>
+          <p className="text-sm text-on-surface-variant mb-4">Pega este enlace en tu lector de noticias para recibir las menciones.</p>
+          <div className="flex items-center gap-2">
+            <input type="text" readOnly value={feedURL} aria-label="Enlace del feed" className="field font-mono text-xs select-all" onFocus={e => e.target.select()} />
+            <button type="button" onClick={handleCopyFeedURL} className={`btn btn-sm shrink-0 ${feedCopied ? 'btn-tonal' : 'btn-filled'}`}>
+              {feedCopied ? 'Copiado' : 'Copiar'}
+            </button>
           </div>
-        </div>
+          <div className="mt-4">
+            <button type="button" onClick={handleRegenerateFeed} disabled={regenerating} className="btn btn-danger btn-sm">
+              {regenerating ? 'Cambiando...' : 'Cambiar enlace'}
+            </button>
+            <p className="text-xs text-on-surface-variant mt-2">El enlace anterior dejará de servir.</p>
+          </div>
+        </Modal>
       )}
     </div>
   );
 }
 
-// ── Hit Card Component — Newspaper Style ─────────────────────────
+// ── Mención ──────────────────────────────────────────────────────
 
 function HitCard({
   hit,
@@ -656,86 +481,44 @@ function HitCard({
   onDelete: () => void;
 }) {
   return (
-    <div className={`overflow-hidden rounded-sm border transition-all ${
-      !hit.seen
-        ? 'border-l-4 border-l-red-500 border-zinc-200 dark:border-zinc-800'
-        : 'border-zinc-200 dark:border-zinc-800'
-    }`}>
-      {/* Dark header bar */}
-      <div className="bg-zinc-800 dark:bg-zinc-950 px-3 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 min-w-0">
-          <SourceIcon type={hit.source_type} className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-          <span className="font-medium text-zinc-300 uppercase tracking-wider">
-            {SOURCE_LABELS[hit.source_type] || hit.source_type}
-          </span>
+    <article className={`flex flex-col overflow-hidden rounded-[28px] hover:rounded-[36px] transition-[border-radius,background-color] duration-500 ease-[var(--spring)] ${hit.seen ? 'bg-surface-container-low' : 'bg-surface-container ring-[3px] ring-tertiary'}`}>
+      <div className="px-5 pt-5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant min-w-0">
+          <SourceIcon type={hit.source_type} className="w-5 h-5 shrink-0" />
+          <span className="uppercase tracking-wider">{SOURCE_LABELS[hit.source_type] || hit.source_type}</span>
           {hit.org_name && (
             <>
-              <span className="text-zinc-600 shrink-0">&middot;</span>
-              <span className="text-zinc-400 truncate">{hit.org_name}</span>
+              <span aria-hidden="true">&middot;</span>
+              <span className="truncate">{hit.org_name}</span>
             </>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] text-zinc-500">{timeAgo(hit.created_at)}</span>
-        </div>
+        <span className="text-xs font-semibold text-on-surface-variant shrink-0">{timeAgo(hit.created_at)}</span>
       </div>
 
-      {/* Title area — newspaper style */}
-      <div className="bg-zinc-50 dark:bg-zinc-900 px-3 py-3">
-        <a
-          href={hit.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[15px] font-extrabold text-zinc-900 dark:text-zinc-50 leading-tight line-clamp-2 uppercase tracking-tight hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-        >
-          {hit.title || 'Sin titulo'}
+      <h3 className="px-5 pt-3 text-lg font-extrabold leading-tight tracking-tight line-clamp-3">
+        <a href={hit.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">
+          {hit.title || 'Sin título'}
         </a>
-      </div>
+      </h3>
 
-      {/* Snippet body */}
-      {hit.snippet && (
-        <div className="bg-white dark:bg-zinc-900 px-3 pt-1 pb-2">
-          <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed line-clamp-3">{hit.snippet}</p>
-        </div>
-      )}
+      {hit.snippet && <p className="px-5 pt-2 text-sm text-on-surface-variant leading-relaxed line-clamp-3">{hit.snippet}</p>}
 
-      {/* Bottom bar */}
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-800">
+      <div className="flex items-center gap-2 p-3 pt-4">
         {!hit.seen && (
-          <button
-            onClick={onMarkSeen}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-zinc-800 hover:bg-indigo-600 rounded-sm transition-colors"
-          >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
-            Leido
+          <button type="button" onClick={onMarkSeen} className="btn btn-filled btn-sm">
+            <Icon name="check" className="w-5 h-5" />Leído
           </button>
         )}
-        <button
-          onClick={onDelete}
-          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 hover:text-red-500 bg-zinc-200 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-sm transition-colors"
-          title="Eliminar"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-          </svg>
-          Eliminar
+        <button type="button" onClick={onDelete} className="btn btn-soft btn-sm" title="Quitar">
+          <Icon name="trash" className="w-5 h-5" />Quitar
         </button>
         {hit.url && (
-          <a
-            href={hit.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ml-auto p-1 text-zinc-400 hover:text-indigo-500 transition-colors"
-            title="Abrir original"
-          >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-            </svg>
+          <a href={hit.url} target="_blank" rel="noopener noreferrer" className="icon-btn ml-auto" title="Abrir original" aria-label="Abrir original">
+            <Icon name="open" />
           </a>
         )}
       </div>
-    </div>
+    </article>
   );
 }
