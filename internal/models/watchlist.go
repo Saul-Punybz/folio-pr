@@ -278,22 +278,6 @@ func (s *WatchlistHitStore) MarkAllSeenByUser(ctx context.Context, userID uuid.U
 	return int(tag.RowsAffected()), nil
 }
 
-func (s *WatchlistHitStore) UpdateSentiment(ctx context.Context, hitID uuid.UUID, sentiment string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE watchlist_hits SET sentiment = $2 WHERE id = $1`, hitID, sentiment)
-	if err != nil {
-		return fmt.Errorf("watchlist hit update sentiment: %w", err)
-	}
-	return nil
-}
-
-func (s *WatchlistHitStore) UpdateAIDraft(ctx context.Context, hitID uuid.UUID, draft string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE watchlist_hits SET ai_draft = $2 WHERE id = $1`, hitID, draft)
-	if err != nil {
-		return fmt.Errorf("watchlist hit update draft: %w", err)
-	}
-	return nil
-}
-
 func (s *WatchlistHitStore) Delete(ctx context.Context, hitID uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM watchlist_hits WHERE id = $1`, hitID)
 	if err != nil {
@@ -320,23 +304,6 @@ func (s *WatchlistHitStore) ListRecentByUser(ctx context.Context, userID uuid.UU
 	`, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("watchlist hits list recent: %w", err)
-	}
-	defer rows.Close()
-	return scanHitRows(rows)
-}
-
-func (s *WatchlistHitStore) ListBySentiment(ctx context.Context, sentiment string, limit int) ([]WatchlistHit, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT wh.id, wh.org_id, wo.name, wh.source_type, wh.title, wh.url, wh.url_hash,
-		       wh.snippet, wh.sentiment, wh.ai_draft, wh.seen, wh.created_at
-		FROM watchlist_hits wh
-		JOIN watchlist_orgs wo ON wo.id = wh.org_id
-		WHERE wh.sentiment = $1
-		ORDER BY wh.created_at DESC
-		LIMIT $2
-	`, sentiment, limit)
-	if err != nil {
-		return nil, fmt.Errorf("watchlist hits by sentiment: %w", err)
 	}
 	defer rows.Close()
 	return scanHitRows(rows)

@@ -1,15 +1,15 @@
 // Package crawler implements the FolioBot web crawler that fetches, indexes,
-// and enriches pages from allowlisted government and news domains.
+// and indexes pages (change detection, no AI) from allowlisted government and news domains.
 package crawler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/scraper"
 )
@@ -21,11 +21,7 @@ type Deps struct {
 	Pages         *models.CrawledPageStore
 	Links         *models.CrawlLinkStore
 	Runs          *models.CrawlRunStore
-	Entities      *models.EntityStore
-	PageEnts      *models.PageEntityStore
-	Rels          *models.EntityRelationshipStore
 	Opportunities *models.OpportunityStore
-	AI            *ai.OllamaClient
 }
 
 const (
@@ -126,7 +122,7 @@ func RunCrawl(ctx context.Context, deps Deps, dailyBudget int) {
 			}
 
 			if result.StatusCode < 200 || result.StatusCode >= 400 {
-				_ = deps.Queue.MarkFailed(ctx, item.ID, "HTTP "+string(rune(result.StatusCode+'0')))
+				_ = deps.Queue.MarkFailed(ctx, item.ID, fmt.Sprintf("HTTP %d", result.StatusCode))
 				run.PagesFailed++
 				totalCrawled++
 				continue
@@ -240,41 +236,6 @@ func RunRecrawl(ctx context.Context, deps Deps) {
 	}
 
 	slog.Info("crawler: recrawl enqueue complete", "enqueued", count)
-}
-
-// RunEnrichment runs AI enrichment on un-enriched crawled pages.
-func RunEnrichment(ctx context.Context, deps Deps, batchSize int) {
-	if batchSize <= 0 {
-		batchSize = 50
-	}
-
-	slog.Info("crawler: starting enrichment", "batch_size", batchSize)
-
-	pages, err := deps.Pages.ListUnenriched(ctx, batchSize)
-	if err != nil {
-		slog.Error("crawler: list unenriched", "err", err)
-		return
-	}
-
-	if len(pages) == 0 {
-		slog.Debug("crawler: no pages to enrich")
-		return
-	}
-
-	enriched := 0
-	for i := range pages {
-		if ctx.Err() != nil {
-			break
-		}
-
-		if err := EnrichPage(ctx, deps, &pages[i]); err != nil {
-			slog.Warn("crawler: enrich page", "id", pages[i].ID, "err", err)
-			continue
-		}
-		enriched++
-	}
-
-	slog.Info("crawler: enrichment complete", "enriched", enriched, "total", len(pages))
 }
 
 func finishRun(ctx context.Context, deps Deps, run *models.CrawlRun, status, errMsg string) {

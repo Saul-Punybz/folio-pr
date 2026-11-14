@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -20,6 +21,19 @@ const sessionDuration = 30 * 24 * time.Hour // 30 days
 type AuthHandler struct {
 	Users    *models.UserStore
 	Sessions *models.SessionStore
+}
+
+// dummyHash se compara cuando el correo no existe, para que la respuesta tarde
+// lo mismo que con un correo real.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("folio-dummy-password"), bcrypt.DefaultCost)
+
+// isHTTPS dice si la petición llegó por HTTPS, directo (TLS) o detrás de un
+// proxy (Caddy/nginx) que pone X-Forwarded-Proto.
+func isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https")
 }
 
 type loginRequest struct {
@@ -37,6 +51,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Email = models.NormalizeEmail(req.Email)
 	if req.Email == "" || req.Password == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email and password required"})
 		return
@@ -45,6 +60,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	user, err := h.Users.GetByEmail(r.Context(), req.Email)
 	if err != nil {
 		slog.Debug("login: user not found", "email", req.Email)
+		// Igualar el tiempo de respuesta para no revelar qué correos existen.
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(req.Password))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
@@ -81,7 +98,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(sessionDuration.Seconds()),
 	})
@@ -110,7 +127,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})

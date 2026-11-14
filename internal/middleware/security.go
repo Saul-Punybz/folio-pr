@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -93,9 +94,11 @@ func (rl *RateLimiter) Allow(ip string) bool {
 func RateLimit(rl *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// RemoteAddr ya viene corregido por chi middleware.RealIP cuando hay
+			// proxy. Se quita el puerto: si no, cada conexión contaría aparte.
 			ip := r.RemoteAddr
-			if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-				ip = fwd
+			if host, _, err := net.SplitHostPort(ip); err == nil {
+				ip = host
 			}
 			if !rl.Allow(ip) {
 				w.Header().Set("Retry-After", "60")

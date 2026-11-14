@@ -6,9 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-
 	"github.com/Saul-Punybz/folio/internal/models"
 )
 
@@ -74,40 +71,5 @@ func (h *SearchHandler) Search(w http.ResponseWriter, r *http.Request) {
 		"query":   q,
 		"limit":   limit,
 		"offset":  offset,
-	})
-}
-
-// Similar handles GET /api/items/{id}/similar?limit=5.
-// Returns articles similar to the given article based on embedding cosine distance.
-func (h *SearchHandler) Similar(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid article id"})
-		return
-	}
-
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 5
-	}
-	if limit > 20 {
-		limit = 20
-	}
-
-	articles, err := h.Articles.SimilarArticles(r.Context(), id, limit)
-	if err != nil {
-		slog.Error("similar articles", "id", id, "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not find similar articles"})
-		return
-	}
-
-	if articles == nil {
-		articles = []models.Article{}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"results": articles,
-		"count":   len(articles),
 	})
 }

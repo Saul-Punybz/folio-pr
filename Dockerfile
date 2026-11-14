@@ -1,8 +1,8 @@
 # Folio — Political Intelligence System
-# Multi-stage Docker build for API and Worker binaries
+# Multi-stage Docker build for the single folio binary (frontend + migrations embedded)
 
 # ── Stage 1: Build ────────────────────────────────────────────
-FROM golang:1.22-alpine AS build
+FROM golang:1.23-alpine AS build
 
 RUN apk add --no-cache git ca-certificates
 
@@ -15,11 +15,8 @@ RUN go mod download
 # Copy all source code
 COPY . .
 
-# Build the API binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api ./cmd/api
-
-# Build the Worker binary
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/worker ./cmd/worker
+# Build the single binary (frontend/dist must exist: `make frontend` first)
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/folio ./cmd/folio
 
 # ── Stage 2: Runtime ─────────────────────────────────────────
 FROM alpine:3.19
@@ -28,16 +25,8 @@ RUN apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy compiled binaries
-COPY --from=build /out/api /app/api
-COPY --from=build /out/worker /app/worker
-
-# Copy frontend static assets (built externally via `make frontend`)
-COPY frontend/dist /app/frontend/dist
-
-# Copy database migrations
-COPY migrations/ /app/migrations/
+COPY --from=build /out/folio /app/folio
 
 EXPOSE 8080
 
-CMD ["/app/api"]
+CMD ["/app/folio"]

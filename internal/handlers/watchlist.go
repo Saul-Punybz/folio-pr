@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,10 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Saul-Punybz/folio/internal/agents"
-	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/middleware"
 	"github.com/Saul-Punybz/folio/internal/models"
+	"github.com/Saul-Punybz/folio/internal/watch"
 )
 
 // WatchlistHandler groups watchlist HTTP handlers.
@@ -23,7 +21,6 @@ type WatchlistHandler struct {
 	Orgs     *models.WatchlistOrgStore
 	Hits     *models.WatchlistHitStore
 	Articles *models.ArticleStore
-	AI       *ai.OllamaClient
 }
 
 // ── Org endpoints ────────────────────────────────────────────────
@@ -311,98 +308,13 @@ func (h *WatchlistHandler) DeleteHit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// EnrichOrg handles POST /api/watchlist/orgs/{id}/enrich.
-// Uses AI to search for the org's website and extract keywords.
-func (h *WatchlistHandler) EnrichOrg(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid org id"})
-		return
-	}
-
-	user := middleware.UserFromContext(r.Context())
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-
-	// Find the org.
-	orgs, err := h.Orgs.ListByUser(r.Context(), user.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	var org *models.WatchlistOrg
-	for i := range orgs {
-		if orgs[i].ID == id {
-			org = &orgs[i]
-			break
-		}
-	}
-	if org == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "org not found"})
-		return
-	}
-
-	// Run enrichment (this takes a few seconds — use a background context with timeout).
-	keywords, enrichErr := agents.EnrichOrgKeywords(context.Background(), org.Name, org.Website, h.AI)
-	if enrichErr != nil {
-		slog.Error("enrich org keywords", "id", id, "err", enrichErr)
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":   "partial",
-			"keywords": org.Keywords,
-			"message":  "No se pudieron extraer palabras clave automaticamente.",
-		})
-		return
-	}
-
-	// Merge: keep any user-defined keywords not already in the AI list.
-	merged := mergeKeywords(keywords, org.Keywords)
-
-	// Update the org with enriched keywords.
-	org.Keywords = merged
-	if err := h.Orgs.Update(r.Context(), org); err != nil {
-		slog.Error("enrich org update", "id", id, "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update org"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":   "enriched",
-		"keywords": merged,
-		"message":  fmt.Sprintf("Se extrajeron %d palabras clave automaticamente.", len(keywords)),
-	})
-}
-
-// mergeKeywords combines AI-extracted keywords with user-provided ones, deduplicating.
-func mergeKeywords(aiKeywords, userKeywords []string) []string {
-	seen := make(map[string]bool)
-	var result []string
-	for _, kw := range aiKeywords {
-		lower := strings.ToLower(strings.TrimSpace(kw))
-		if !seen[lower] && kw != "" {
-			seen[lower] = true
-			result = append(result, strings.TrimSpace(kw))
-		}
-	}
-	for _, kw := range userKeywords {
-		lower := strings.ToLower(strings.TrimSpace(kw))
-		if !seen[lower] && kw != "" {
-			seen[lower] = true
-			result = append(result, strings.TrimSpace(kw))
-		}
-	}
-	return result
-}
-
 // TriggerScan handles POST /api/watchlist/scan.
 // Launches the watchlist scan in the background and returns immediately.
 func (h *WatchlistHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
-	go agents.RunWatchlistScan(context.Background(), agents.Deps{
+	go watch.RunWatchlistScan(context.Background(), watch.Deps{
 		Orgs:     h.Orgs,
 		Hits:     h.Hits,
 		Articles: h.Articles,
-		AI:       h.AI,
 	})
 
 	writeJSON(w, http.StatusAccepted, map[string]string{

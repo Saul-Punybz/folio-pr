@@ -282,7 +282,7 @@ export default function InboxFeed() {
           <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
         </div>
         <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-3">{error}</p>
-        <button onClick={fetchItems} className="px-4 py-2 text-sm font-medium text-indigo-500 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors">Try again</button>
+        <button onClick={() => fetchItems()} className="px-4 py-2 text-sm font-medium text-indigo-500 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors">Try again</button>
       </div>
     );
   }

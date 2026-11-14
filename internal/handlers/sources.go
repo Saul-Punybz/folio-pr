@@ -15,7 +15,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/scraper"
 )
@@ -24,7 +23,6 @@ import (
 type SourcesHandler struct {
 	Sources *models.SourceStore
 	Scraper *scraper.Scraper
-	AI      *ai.OllamaClient
 }
 
 // ListSources handles GET /api/sources — returns ALL sources (active and inactive).

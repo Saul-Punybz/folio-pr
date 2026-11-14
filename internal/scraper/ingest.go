@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/storage"
 )
@@ -23,9 +21,6 @@ const (
 
 	// maxPerSource is the maximum number of articles to ingest per source per run.
 	maxPerSource = 25
-
-	// maxConcurrentAI limits parallel AI enrichment goroutines.
-	maxConcurrentAI = 3
 
 	// defaultEvidencePolicy is the default retention policy for new articles.
 	defaultEvidencePolicy = "ret_3m"
@@ -40,6 +35,7 @@ type DiscoveredArticle struct {
 	Description string
 	Published   time.Time
 	ImageURL    string
+	Categories  []string
 }
 
 // Stores groups the data stores needed by the ingestion pipeline.
@@ -47,13 +43,13 @@ type Stores struct {
 	Articles     *models.ArticleStore
 	Sources      *models.SourceStore
 	Fingerprints *models.FingerprintStore
-	Entities     *models.EntityStore
 }
 
 // RunIngestion is the main ingestion job. It iterates over all active sources,
 // discovers article URLs, deduplicates via fingerprints, scrapes content, and
-// enqueues AI enrichment in background goroutines.
-func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient *ai.OllamaClient, storageClient *storage.Client) {
+// stores each article with a rule-based summary (no AI). It returns the number
+// of articles created.
+func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, storageClient *storage.Client) int {
 	slog.Info("ingestion: starting run")
 	startTime := time.Now()
 
@@ -67,7 +63,7 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 	remaining := maxDailyArticles - todayCount
 	if remaining <= 0 {
 		slog.Info("ingestion: daily limit reached", "count", todayCount)
-		return
+		return 0
 	}
 
 	slog.Info("ingestion: daily budget", "used", todayCount, "remaining", remaining)
@@ -76,19 +72,16 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 	sources, err := stores.Sources.ListActive(ctx)
 	if err != nil {
 		slog.Error("ingestion: list active sources", "err", err)
-		return
+		return 0
 	}
 
 	if len(sources) == 0 {
 		slog.Info("ingestion: no active sources configured")
-		return
+		return 0
 	}
 
 	slog.Info("ingestion: processing sources", "count", len(sources))
 
-	// Semaphore for concurrent AI enrichment.
-	sem := make(chan struct{}, maxConcurrentAI)
-	var wg sync.WaitGroup
 	var ingested atomic.Int32
 
 	for _, src := range sources {
@@ -171,10 +164,6 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 					"text_len", len(cleanText),
 				)
 
-				// Try to get og:image from the page if RSS didn't provide one.
-				if imageURL == "" {
-					imageURL = scraper.ExtractImageURL(ctx, rawURL)
-				}
 			} else {
 				// No RSS data available — fall back to scraping the page.
 				selectors := SourceSelectors{
@@ -224,23 +213,15 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 			if src.Region != "PR" && src.Region != "Grants" {
 				textForCheck := title + " " + cleanText
 				if !isPRRelevant(textForCheck) {
-					// No keyword match — try Ollama for a quick check
-					if aiClient != nil {
-						relevant, aiErr := aiCheckPRRelevance(ctx, aiClient, title, truncate(cleanText, 500))
-						if aiErr != nil {
-							slog.Debug("ingestion: PR-relevance AI check failed, skipping", "url", rawURL, "err", aiErr)
-							continue
-						}
-						if !relevant {
-							slog.Debug("ingestion: US article not PR-related (AI), skipping", "title", truncate(title, 60))
-							continue
-						}
-						slog.Info("ingestion: US article is PR-related (AI confirmed)", "title", truncate(title, 60))
-					} else {
-						slog.Debug("ingestion: US article not PR-related (keywords), skipping", "title", truncate(title, 60))
-						continue
-					}
+					slog.Debug("ingestion: US article not PR-related (keywords), skipping", "title", truncate(title, 60))
+					continue
 				}
+			}
+
+			// og:image solo para lo que pasó los filtros (cada intento puede
+			// tardar segundos; antes se hacía para todo lo descubierto).
+			if imageURL == "" && rawHTML == "" {
+				imageURL = scraper.ExtractImageURL(ctx, rawURL)
 			}
 
 			// Create fingerprint record.
@@ -260,17 +241,19 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 			// Create the article record.
 			srcID := src.ID
 			article := &models.Article{
-				ID:           uuid.New(),
-				Title:        title,
-				Source:       src.Name,
-				SourceID:     &srcID,
-				URL:          rawURL,
-				CanonicalURL: canonical,
-				Region:       src.Region,
-				PublishedAt:  timePtr(publishedAt),
-				CleanText:    cleanText,
-				ImageURL:     imageURL,
-				Status:       "inbox",
+				ID:                uuid.New(),
+				Title:             title,
+				Source:            src.Name,
+				SourceID:          &srcID,
+				URL:               rawURL,
+				CanonicalURL:      canonical,
+				Region:            src.Region,
+				PublishedAt:       timePtr(publishedAt),
+				CleanText:         cleanText,
+				Summary:           RuleSummary(da.Description, MetaDescription(rawHTML), FirstParagraph(cleanText)),
+				Tags:              NormalizeTags(da.Categories),
+				ImageURL:          imageURL,
+				Status:            "inbox",
 				EvidencePolicy:    defaultEvidencePolicy,
 				EvidenceExpiresAt: evidenceExpiry,
 			}
@@ -289,25 +272,15 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 				"has_image", imageURL != "",
 			)
 
-			// Enqueue AI enrichment in background.
-			wg.Add(1)
-			go func(art *models.Article, html string) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				enrichArticle(ctx, art, html, stores, aiClient, storageClient)
-			}(article, rawHTML)
+			storeEvidence(ctx, article, rawHTML, storageClient)
 		}
 	}
-
-	// Wait for all background AI enrichment to finish.
-	wg.Wait()
 
 	slog.Info("ingestion: run complete",
 		"articles_ingested", ingested.Load(),
 		"duration", time.Since(startTime).Round(time.Millisecond),
 	)
+	return int(ingested.Load())
 }
 
 // discoverArticles returns a list of discovered articles from a source based on
@@ -334,6 +307,7 @@ func discoverArticles(ctx context.Context, src models.Source, scraper *Scraper) 
 				Description: CleanText(item.Description),
 				Published:   item.Published,
 				ImageURL:    item.ImageURL,
+				Categories:  item.Categories,
 			}
 			results = append(results, da)
 		}
@@ -378,186 +352,29 @@ func discoverArticles(ctx context.Context, src models.Source, scraper *Scraper) 
 	}
 }
 
-// enrichArticle runs AI summarization, classification, entity extraction, and
-// embedding, then uploads evidence to S3 and updates the article record.
-func enrichArticle(ctx context.Context, article *models.Article, rawHTML string, stores Stores, aiClient *ai.OllamaClient, storageClient *storage.Client) {
-	articleID := article.ID
-	slog.Info("enrichment: starting", "id", articleID, "title", truncate(article.Title, 60))
-
-	text := article.CleanText
-	if text == "" {
-		slog.Warn("enrichment: no clean text, skipping", "id", articleID)
+// storeEvidence sube a S3 (si hay storage) el HTML crudo y lo extraído por
+// reglas. No hay IA: resumen y tags ya vienen calculados en el artículo.
+func storeEvidence(ctx context.Context, article *models.Article, rawHTML string, storageClient *storage.Client) {
+	if !storageClient.Configured() {
 		return
 	}
-
-	// Truncate very long texts for AI processing.
-	aiText := text
-	if len(aiText) > 8000 {
-		aiText = aiText[:8000]
-	}
-
-	// Summarize.
-	summary, err := aiClient.Summarize(ctx, aiText)
+	extracted, err := json.Marshal(map[string]interface{}{
+		"title":   article.Title,
+		"text":    article.CleanText,
+		"tags":    article.Tags,
+		"summary": article.Summary,
+	})
 	if err != nil {
-		slog.Error("enrichment: summarize", "id", articleID, "err", err)
-	} else {
-		slog.Debug("enrichment: summary generated", "id", articleID, "len", len(summary))
-	}
-
-	// Classify.
-	tags, err := aiClient.Classify(ctx, aiText)
-	if err != nil {
-		slog.Error("enrichment: classify", "id", articleID, "err", err)
-	} else {
-		slog.Debug("enrichment: tags generated", "id", articleID, "tags", tags)
-	}
-
-	// Extract entities.
-	extractedEntities, err := aiClient.ExtractEntities(ctx, aiText)
-	if err != nil {
-		slog.Error("enrichment: extract entities", "id", articleID, "err", err)
-	} else {
-		totalEntities := len(extractedEntities.People) + len(extractedEntities.Organizations) + len(extractedEntities.Places)
-		slog.Debug("enrichment: entities extracted", "id", articleID,
-			"people", len(extractedEntities.People),
-			"orgs", len(extractedEntities.Organizations),
-			"places", len(extractedEntities.Places),
-			"total", totalEntities,
-		)
-	}
-
-	// Persist entities to the entities table and link to the article.
-	if stores.Entities != nil && extractedEntities != nil {
-		for _, name := range extractedEntities.People {
-			if entityID, err := stores.Entities.Upsert(ctx, name, "person"); err != nil {
-				slog.Error("enrichment: upsert person entity", "id", articleID, "name", name, "err", err)
-			} else {
-				if err := stores.Entities.LinkToArticle(ctx, articleID, entityID); err != nil {
-					slog.Error("enrichment: link person entity", "id", articleID, "entity", entityID, "err", err)
-				}
-			}
-		}
-		for _, name := range extractedEntities.Organizations {
-			if entityID, err := stores.Entities.Upsert(ctx, name, "organization"); err != nil {
-				slog.Error("enrichment: upsert org entity", "id", articleID, "name", name, "err", err)
-			} else {
-				if err := stores.Entities.LinkToArticle(ctx, articleID, entityID); err != nil {
-					slog.Error("enrichment: link org entity", "id", articleID, "entity", entityID, "err", err)
-				}
-			}
-		}
-		for _, name := range extractedEntities.Places {
-			if entityID, err := stores.Entities.Upsert(ctx, name, "place"); err != nil {
-				slog.Error("enrichment: upsert place entity", "id", articleID, "name", name, "err", err)
-			} else {
-				if err := stores.Entities.LinkToArticle(ctx, articleID, entityID); err != nil {
-					slog.Error("enrichment: link place entity", "id", articleID, "entity", entityID, "err", err)
-				}
-			}
-		}
-	}
-
-	// Classify sentiment.
-	sentiment, err := aiClient.ClassifySentiment(ctx, aiText)
-	if err != nil {
-		slog.Error("enrichment: classify sentiment", "id", articleID, "err", err)
-		sentiment = "neutral"
-	} else {
-		slog.Debug("enrichment: sentiment classified", "id", articleID, "sentiment", sentiment)
-	}
-
-	// Generate embedding.
-	embedding, err := aiClient.Embed(ctx, aiText)
-	if err != nil {
-		slog.Error("enrichment: embed", "id", articleID, "err", err)
-	} else {
-		slog.Debug("enrichment: embedding generated", "id", articleID)
-	}
-
-	// Update article with summary, tags, and embedding.
-	if summary != "" || len(tags) > 0 || len(embedding) > 0 {
-		if err := stores.Articles.UpdateEnrichment(ctx, articleID, summary, tags, embedding); err != nil {
-			slog.Error("enrichment: update article", "id", articleID, "err", err)
-		}
-	}
-
-	// Update entities and sentiment on the article record.
-	if stores.Entities != nil {
-		entitiesJSON, _ := json.Marshal(extractedEntities)
-		_, execErr := stores.Articles.Pool().Exec(ctx,
-			"UPDATE articles SET entities = $1, sentiment = $2 WHERE id = $3",
-			entitiesJSON, sentiment, articleID)
-		if execErr != nil {
-			slog.Error("enrichment: update entities/sentiment", "id", articleID, "err", execErr)
-		}
-	}
-
-	// Upload evidence to S3.
-	if storageClient.Configured() {
-		extracted, err := json.Marshal(map[string]interface{}{
-			"title":     article.Title,
-			"text":      article.CleanText,
-			"tags":      tags,
-			"entities":  extractedEntities,
-			"summary":   summary,
-			"sentiment": sentiment,
-		})
-		if err != nil {
-			slog.Error("enrichment: marshal extracted", "id", articleID, "err", err)
-		} else {
-			policy := article.EvidencePolicy
-			if policy == "" {
-				policy = defaultEvidencePolicy
-			}
-			if err := storageClient.StoreEvidence(ctx, articleID, policy, []byte(rawHTML), extracted, nil); err != nil {
-				slog.Error("enrichment: upload evidence", "id", articleID, "err", err)
-			} else {
-				slog.Debug("enrichment: evidence uploaded", "id", articleID)
-			}
-		}
-	}
-
-	slog.Info("enrichment: complete", "id", articleID)
-}
-
-// RunReEnrichment processes articles that are missing embeddings or sentiment.
-// It picks up a batch of articles and runs the full enrichment pipeline on each.
-func RunReEnrichment(ctx context.Context, stores Stores, aiClient *ai.OllamaClient, storageClient *storage.Client, batchSize int) {
-	slog.Info("re-enrichment: starting")
-
-	articles, err := stores.Articles.ListNeedingReEnrichment(ctx, batchSize)
-	if err != nil {
-		slog.Error("re-enrichment: list articles", "err", err)
+		slog.Error("evidence: marshal extracted", "id", article.ID, "err", err)
 		return
 	}
-
-	if len(articles) == 0 {
-		slog.Info("re-enrichment: no articles need enrichment")
-		return
+	policy := article.EvidencePolicy
+	if policy == "" {
+		policy = defaultEvidencePolicy
 	}
-
-	slog.Info("re-enrichment: processing batch", "count", len(articles))
-
-	sem := make(chan struct{}, maxConcurrentAI)
-	var wg sync.WaitGroup
-
-	for i := range articles {
-		if ctx.Err() != nil {
-			break
-		}
-
-		wg.Add(1)
-		go func(art *models.Article) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			enrichArticle(ctx, art, "", stores, aiClient, storageClient)
-		}(&articles[i])
+	if err := storageClient.StoreEvidence(ctx, article.ID, policy, []byte(rawHTML), extracted, nil); err != nil {
+		slog.Error("evidence: upload", "id", article.ID, "err", err)
 	}
-
-	wg.Wait()
-	slog.Info("re-enrichment: batch complete", "processed", len(articles))
 }
 
 // RunEvidenceCleanup deletes expired evidence from S3 and clears the expiry
@@ -754,6 +571,7 @@ func isNoiseTitle(title string) bool {
 // Checked case-insensitively against title + body text.
 var prKeywords = []string{
 	"puerto rico",
+	"puerto rican", // "puerto rican" no contiene "puerto rico"
 	"puertorrique",
 	"boricua",
 	"borinquen",
@@ -783,11 +601,9 @@ var prKeywords = []string{
 	"act 20",
 	"acta 60",
 	"titulo v",
-	"territory",
-	"territorial",
-	"statehood",
-	"commonwealth",
 	"estado libre asociado",
+	// "territory", "territorial", "statehood" y "commonwealth" se quitaron:
+	// solos traen ruido (Commonwealth of Virginia, Northern Territory, etc.).
 }
 
 // isPRRelevant does a fast keyword check to see if text mentions Puerto Rico.
@@ -801,34 +617,15 @@ func isPRRelevant(text string) bool {
 	return false
 }
 
-// aiCheckPRRelevance uses Ollama to determine if an article is related to Puerto Rico.
-func aiCheckPRRelevance(ctx context.Context, aiClient *ai.OllamaClient, title, body string) (bool, error) {
-	prompt := fmt.Sprintf(`Article title: %s
-
-Article excerpt: %s
-
-Question: Is this article directly related to Puerto Rico, its people, economy, politics, culture, or diaspora?
-Answer with ONLY "yes" or "no".`, title, body)
-
-	result, err := aiClient.Generate(ctx,
-		"You are a news classifier. Answer only 'yes' or 'no'. An article is PR-related if it mentions Puerto Rico, Puerto Ricans, the island's economy, politics, culture, disasters, territorial status, or the Puerto Rican diaspora in the US.",
-		prompt,
-	)
-	if err != nil {
-		return false, err
-	}
-	answer := strings.ToLower(strings.TrimSpace(result))
-	return strings.HasPrefix(answer, "yes") || strings.Contains(answer, "sí"), nil
-}
-
 // truncate shortens a string to the given maximum length, appending "..." if
 // truncated.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	r := []rune(s)
+	if len(r) <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return string(r[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string(r[:maxLen-3]) + "..."
 }

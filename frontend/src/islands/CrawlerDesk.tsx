@@ -72,7 +72,7 @@ const DOMAIN_CATEGORY_OPTIONS = [
 type Tab = 'oportunidades' | 'dominios';
 
 // Process phases for the single-button flow
-type ProcessPhase = 'idle' | 'crawling' | 'extracting' | 'done';
+type ProcessPhase = 'idle' | 'crawling' | 'done';
 
 // ── Main Component ─────────────────────────────────────────────────
 // All process state is here so tab switching never kills a running scan.
@@ -105,29 +105,17 @@ export default function CrawlerDesk() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
-  // ─ Single "Escanear" action: crawl + extract in parallel ─
+  // ─ Single "Escanear" action: dispara el crawl y refresca ─
   const handleFullScan = useCallback(async () => {
     if (phase !== 'idle') return;
 
     setPhase('crawling');
-    setStatusMsg('Iniciando... rastreando agencias y analizando paginas');
+    setStatusMsg('Rastreando las páginas de los fondos...');
 
-    // Fire both crawl AND extraction in parallel
-    // Extraction processes existing pages while crawl fetches new ones
     try { await api.triggerCrawl(); } catch (e) { console.error(e); }
+    refreshCallbackRef.current?.();
 
-    // Small delay then trigger extraction on existing pages
-    setTimeout(async () => {
-      try { await api.triggerOpportunityExtraction(); } catch (e) { console.error(e); }
-    }, 2000);
-
-    // Move to extracting phase after a short crawl period
-    setTimeout(() => {
-      setPhase('extracting');
-      setStatusMsg('Analizando paginas con AI para detectar oportunidades...');
-    }, 8000);
-
-    // Poll for opportunities appearing
+    // Refresca mientras el crawl avanza
     let elapsed = 0;
     const prevTotal = { current: 0 };
     pollRef.current = setInterval(async () => {
@@ -136,22 +124,18 @@ export default function CrawlerDesk() {
         const s = await api.getOpportunityStats();
         const newTotal = s.total || 0;
         if (newTotal > prevTotal.current) {
-          setStatusMsg(`${newTotal} oportunidades encontradas...`);
+          setStatusMsg(`${newTotal} fondos encontrados...`);
           prevTotal.current = newTotal;
           refreshCallbackRef.current?.();
-        } else if (elapsed > 15 && newTotal === 0) {
-          setStatusMsg('Analizando paginas con AI... esto puede tomar unos minutos');
         }
       } catch { /* ignore */ }
 
-      // Run for up to 3 minutes
-      if (elapsed >= 180) {
+      if (elapsed >= 60) {
         if (pollRef.current) clearInterval(pollRef.current);
         setPhase('done');
-        const msg = prevTotal.current > 0
-          ? `Escaneo completo. ${prevTotal.current} oportunidades encontradas.`
-          : 'Escaneo completo. El AI seguira analizando en background.';
-        setStatusMsg(msg);
+        setStatusMsg(prevTotal.current > 0
+          ? `Escaneo completo. ${prevTotal.current} fondos.`
+          : 'Escaneo completo.');
         refreshCallbackRef.current?.();
         setTimeout(() => { setPhase('idle'); setStatusMsg(''); }, 8000);
       }
@@ -180,8 +164,6 @@ export default function CrawlerDesk() {
             <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
           )}
           <span className="flex-1">{statusMsg}</span>
-          {phase === 'crawling' && <span className="text-violet-400 dark:text-violet-500">Fase 1/2 — Crawl</span>}
-          {phase === 'extracting' && <span className="text-violet-400 dark:text-violet-500">Fase 2/2 — AI</span>}
         </div>
       )}
 
@@ -213,7 +195,7 @@ export default function CrawlerDesk() {
           {isBusy ? (
             <>
               <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              {phase === 'crawling' ? 'Escaneando...' : 'Analizando...'}
+              {phase === 'crawling' ? 'Escaneando...' : 'Escanear'}
             </>
           ) : (
             <>
@@ -478,9 +460,12 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   );
 }
 
-// Open URL via backend (macOS `open` command) — works in Wails WebView
 function openExternal(url: string) {
-  fetch(`/api/open-url?url=${encodeURIComponent(url)}`).catch(() => {});
+  if (url.startsWith('mailto:')) {
+    window.location.href = url;
+  } else {
+    window.open(url, '_blank', 'noopener');
+  }
 }
 
 // Strip CSS/JS garbage and navigation boilerplate from page text for display

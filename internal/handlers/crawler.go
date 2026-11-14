@@ -17,14 +17,11 @@ import (
 
 // CrawlerHandler handles FolioBot crawler API endpoints.
 type CrawlerHandler struct {
-	Domains  *models.CrawlDomainStore
-	Queue    *models.CrawlQueueStore
-	Pages    *models.CrawledPageStore
-	Links    *models.CrawlLinkStore
-	Runs     *models.CrawlRunStore
-	Entities *models.EntityStore
-	PageEnts *models.PageEntityStore
-	Rels     *models.EntityRelationshipStore
+	Domains   *models.CrawlDomainStore
+	Queue     *models.CrawlQueueStore
+	Pages     *models.CrawledPageStore
+	Links     *models.CrawlLinkStore
+	Runs      *models.CrawlRunStore
 	CrawlDeps crawler.Deps
 }
 
@@ -39,11 +36,11 @@ func (h *CrawlerHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	latestRun, _ := h.Runs.GetLatest(ctx)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_pages":  totalPages,
-		"total_links":  totalLinks,
+		"total_pages":   totalPages,
+		"total_links":   totalLinks,
 		"total_domains": len(domains),
-		"queue":        queueCounts,
-		"latest_run":   latestRun,
+		"queue":         queueCounts,
+		"latest_run":    latestRun,
 	})
 }
 
@@ -143,41 +140,13 @@ func (h *CrawlerHandler) GetPage(w http.ResponseWriter, r *http.Request) {
 
 	outLinks, _ := h.Links.ListOutbound(r.Context(), id)
 	inLinks, _ := h.Links.ListInbound(r.Context(), id)
-	entities, _ := h.PageEnts.EntitiesForPage(r.Context(), id)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"page":      page,
 		"links_out": outLinks,
 		"links_in":  inLinks,
-		"entities":  entities,
+		"entities":  []any{}, // sin IA ya no se extraen entidades; se deja la llave por compatibilidad
 	})
-}
-
-// GetGraph returns the knowledge graph (entities + edges).
-func (h *CrawlerHandler) GetGraph(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	nodes, edges, err := h.Rels.GetGraph(r.Context(), limit)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes, "edges": edges})
-}
-
-// GetEntityRelations returns relationships for a single entity.
-func (h *CrawlerHandler) GetEntityRelations(w http.ResponseWriter, r *http.Request) {
-	entityID, err := uuid.Parse(chi.URLParam(r, "entityId"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid entityId"})
-		return
-	}
-
-	rels, entities, err := h.Rels.GetEntityRelations(r.Context(), entityID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"relationships": rels, "entities": entities})
 }
 
 // ListDomains returns all crawler domains.

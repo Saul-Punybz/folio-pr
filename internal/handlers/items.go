@@ -11,7 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Saul-Punybz/folio/internal/ai"
 	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/scraper"
 )
@@ -20,7 +19,6 @@ import (
 type ItemsHandler struct {
 	Articles *models.ArticleStore
 	Scraper  *scraper.Scraper
-	AI       *ai.OllamaClient
 }
 
 // ListItems handles GET /api/items?status=inbox&limit=50&offset=0&date=2026-03-10.
@@ -264,7 +262,7 @@ func (h *ItemsHandler) CollectItem(w http.ResponseWriter, r *http.Request) {
 		CanonicalURL:   req.URL,
 		Region:         region,
 		Status:         "inbox",
-		Summary:        req.Snippet,
+		Summary:        scraper.RuleSummary(req.Snippet),
 		EvidencePolicy: "ret_3m",
 	}
 
@@ -275,15 +273,15 @@ func (h *ItemsHandler) CollectItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Scrape + enrich in background so the article has full data.
-	if h.Scraper != nil && h.AI != nil {
+	if h.Scraper != nil {
 		go h.enrichCollectedArticle(article.ID, article.URL)
 	}
 
 	writeJSON(w, http.StatusCreated, article)
 }
 
-// enrichCollectedArticle scrapes the URL for content, image, then runs AI
-// summarization, classification, and embedding to fill in all missing data.
+// enrichCollectedArticle scrapes the URL for content and image, and fills the
+// summary by rules (meta description or first paragraph). No AI.
 func (h *ItemsHandler) enrichCollectedArticle(id uuid.UUID, articleURL string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -322,7 +320,7 @@ func (h *ItemsHandler) enrichCollectedArticle(id uuid.UUID, articleURL string) {
 	}
 
 	if scraped == nil || len(scraped.CleanText) < 50 {
-		slog.Warn("collect: no text extracted, skipping AI enrichment", "id", id, "url", articleURL)
+		slog.Warn("collect: no text extracted, skipping enrichment", "id", id, "url", articleURL)
 		return
 	}
 
@@ -346,34 +344,10 @@ func (h *ItemsHandler) enrichCollectedArticle(id uuid.UUID, articleURL string) {
 		slog.Warn("collect: update content", "id", id, "err", err)
 	}
 
-	// Step 4: AI enrichment — summarize, classify, embed.
-	text := cleanText
-	if len(text) > 8000 {
-		text = text[:8000]
-	}
-
-	summary, err := h.AI.Summarize(ctx, text)
-	if err != nil {
-		slog.Warn("collect: summarize", "id", id, "err", err)
-		return
-	}
-
-	tags, err := h.AI.Classify(ctx, text)
-	if err != nil {
-		slog.Warn("collect: classify", "id", id, "err", err)
-		tags = nil
-	}
-
-	embedding, err := h.AI.Embed(ctx, text)
-	if err != nil {
-		slog.Warn("collect: embed", "id", id, "err", err)
-		embedding = nil
-	}
-
-	// Only overwrite summary if we got a better one from AI (don't clobber snippet).
-	if summary != "" {
-		if err := h.Articles.UpdateEnrichment(ctx, id, summary, tags, embedding); err != nil {
-			slog.Warn("collect: update enrichment", "id", id, "err", err)
+	// Step 4: resumen por reglas; no pisa el snippet que mandó el usuario.
+	if summary := scraper.RuleSummary(scraper.MetaDescription(scraped.RawHTML), scraper.FirstParagraph(cleanText)); summary != "" {
+		if err := h.Articles.SetSummaryIfEmpty(ctx, id, summary); err != nil {
+			slog.Warn("collect: update summary", "id", id, "err", err)
 		}
 	}
 

@@ -192,23 +192,32 @@ func (s *ArticleStore) Create(ctx context.Context, article *Article) error {
 		article.ID = uuid.New()
 	}
 
+	tags := article.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return fmt.Errorf("article create: marshal tags: %w", err)
+	}
+
 	// Use nil for empty image_url to store NULL in the database.
 	var imageURL *string
 	if article.ImageURL != "" {
 		imageURL = &article.ImageURL
 	}
 
-	err := s.pool.QueryRow(ctx, `
+	err = s.pool.QueryRow(ctx, `
 		INSERT INTO articles (id, title, source, source_id, url, canonical_url, region,
 		                      published_at, clean_text, summary, image_url, status, pinned,
-		                      evidence_policy, evidence_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		                      evidence_policy, evidence_expires_at, tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING created_at
 	`,
 		article.ID, article.Title, article.Source, article.SourceID, article.URL,
 		article.CanonicalURL, article.Region, article.PublishedAt,
 		article.CleanText, article.Summary, imageURL, article.Status, article.Pinned,
-		article.EvidencePolicy, article.EvidenceExpiresAt,
+		article.EvidencePolicy, article.EvidenceExpiresAt, tagsJSON,
 	).Scan(&article.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("article create: %w", err)
@@ -216,71 +225,16 @@ func (s *ArticleStore) Create(ctx context.Context, article *Article) error {
 	return nil
 }
 
-// UpdateEnrichment sets the AI-generated summary, tags, and embedding on an article.
-func (s *ArticleStore) UpdateEnrichment(ctx context.Context, id uuid.UUID, summary string, tags []string, embedding []float32) error {
-	// Marshal tags to JSON for JSONB column.
-	tagsJSON, err := json.Marshal(tags)
+// SetSummaryIfEmpty sets the rule-based summary only when the article has none.
+func (s *ArticleStore) SetSummaryIfEmpty(ctx context.Context, id uuid.UUID, summary string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE articles SET summary = $1
+		WHERE id = $2 AND (summary IS NULL OR summary = '')
+	`, summary, id)
 	if err != nil {
-		return fmt.Errorf("article update enrichment: marshal tags: %w", err)
-	}
-
-	// Format embedding as pgvector string: [0.1,0.2,...].
-	var embeddingStr *string
-	if len(embedding) > 0 {
-		parts := make([]string, len(embedding))
-		for i, v := range embedding {
-			parts[i] = fmt.Sprintf("%g", v)
-		}
-		s := "[" + strings.Join(parts, ",") + "]"
-		embeddingStr = &s
-	}
-
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE articles
-		SET summary = $1, tags = $2, embedding = $3
-		WHERE id = $4
-	`, summary, tagsJSON, embeddingStr, id)
-	if err != nil {
-		return fmt.Errorf("article update enrichment: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("article not found: %s", id)
+		return fmt.Errorf("article set summary: %w", err)
 	}
 	return nil
-}
-
-// SimilarArticles returns articles similar to the given article using pgvector
-// cosine distance on embeddings.
-func (s *ArticleStore) SimilarArticles(ctx context.Context, id uuid.UUID, limit int) ([]Article, error) {
-	if limit <= 0 {
-		limit = 5
-	}
-
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, source, url, canonical_url, region, published_at,
-		       clean_text, summary, image_url, status, pinned, evidence_policy,
-		       evidence_expires_at, tags, created_at
-		FROM articles
-		WHERE id != $1
-		  AND embedding IS NOT NULL
-		ORDER BY embedding <=> (SELECT embedding FROM articles WHERE id = $1)
-		LIMIT $2
-	`, id, limit)
-	if err != nil {
-		return nil, fmt.Errorf("article similar: %w", err)
-	}
-	defer rows.Close()
-
-	var articles []Article
-	for rows.Next() {
-		a := scanArticleFromRow(rows)
-		if a == nil {
-			return nil, fmt.Errorf("article similar scan: failed")
-		}
-		articles = append(articles, *a)
-	}
-
-	return articles, rows.Err()
 }
 
 // ListRecent returns articles created in the last N hours, ordered by creation time.
@@ -395,100 +349,6 @@ func (s *ArticleStore) SetImageURL(ctx context.Context, id uuid.UUID, imageURL s
 	return nil
 }
 
-// ClearGarbageEnrichment clears summary and tags for articles where the summary
-// contains AI garbage patterns. Returns the number of articles cleared.
-func (s *ArticleStore) ClearGarbageEnrichment(ctx context.Context) (int, error) {
-	// These patterns match the garbage output from poorly prompted LLMs.
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE articles
-		SET summary = '', tags = '[]'::jsonb
-		WHERE summary != '' AND (
-			lower(summary) LIKE '%no hay información%'
-			OR lower(summary) LIKE '%no tengo%'
-			OR lower(summary) LIKE '%no puedo%'
-			OR lower(summary) LIKE '%i cannot%'
-			OR lower(summary) LIKE '%i don''t have%'
-			OR lower(summary) LIKE '%there is no information%'
-			OR lower(summary) LIKE '%none of the provided%'
-			OR lower(summary) LIKE '%puedo sugerir%'
-			OR lower(summary) LIKE '%sin embargo%'
-			OR lower(summary) LIKE '%por favor proporciona%'
-			OR lower(summary) LIKE '%clasificarlo en%'
-			OR lower(summary) LIKE '%posibles etiquetas%'
-			OR lower(summary) LIKE '%si deseas más%'
-			OR lower(summary) LIKE '%they might fit%'
-			OR lower(summary) LIKE '%if i had to%'
-			OR lower(summary) LIKE '%based on the context%'
-		)
-	`)
-	if err != nil {
-		return 0, fmt.Errorf("clear garbage enrichment: %w", err)
-	}
-	return int(tag.RowsAffected()), nil
-}
-
-// ListNeedingEnrichment returns articles that have clean_text but no summary.
-func (s *ArticleStore) ListNeedingEnrichment(ctx context.Context, limit int) ([]Article, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, source, url, canonical_url, region, published_at,
-		       clean_text, summary, image_url, status, pinned, evidence_policy,
-		       evidence_expires_at, tags, created_at
-		FROM articles
-		WHERE clean_text != '' AND (summary = '' OR summary IS NULL)
-		ORDER BY created_at DESC
-		LIMIT $1
-	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("article list needing enrichment: %w", err)
-	}
-	defer rows.Close()
-
-	var articles []Article
-	for rows.Next() {
-		a := scanArticleFromRow(rows)
-		if a == nil {
-			return nil, fmt.Errorf("article needing enrichment scan: failed")
-		}
-		articles = append(articles, *a)
-	}
-	return articles, rows.Err()
-}
-
-// ListNeedingReEnrichment returns articles that have clean_text but are missing
-// embeddings or sentiment. Used by the re-enrichment cron job.
-func (s *ArticleStore) ListNeedingReEnrichment(ctx context.Context, limit int) ([]Article, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, source, url, canonical_url, region, published_at,
-		       clean_text, summary, image_url, status, pinned, evidence_policy,
-		       evidence_expires_at, tags, created_at
-		FROM articles
-		WHERE clean_text != ''
-		  AND (embedding IS NULL OR sentiment = '' OR sentiment IS NULL)
-		ORDER BY created_at DESC
-		LIMIT $1
-	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("article list needing re-enrichment: %w", err)
-	}
-	defer rows.Close()
-
-	var articles []Article
-	for rows.Next() {
-		a := scanArticleFromRow(rows)
-		if a == nil {
-			return nil, fmt.Errorf("article needing re-enrichment scan: failed")
-		}
-		articles = append(articles, *a)
-	}
-	return articles, rows.Err()
-}
-
 // ClearEvidenceExpiry sets evidence_expires_at to NULL for the given article.
 func (s *ArticleStore) ClearEvidenceExpiry(ctx context.Context, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `
@@ -591,149 +451,6 @@ func (s *ArticleStore) Search(ctx context.Context, query string, from, to time.T
 	return articles, rows.Err()
 }
 
-// SearchByKeywords searches articles using ILIKE on individual keywords extracted
-// from the topic. Unlike FTS, this handles accented vs unaccented characters
-// naturally (e.g. "energia" matches "energía"). Filters out geographic terms
-// like "puerto rico" to focus on topical keywords. Searches across all statuses.
-func (s *ArticleStore) SearchByKeywords(ctx context.Context, topic string, limit int) ([]Article, error) {
-	if limit <= 0 {
-		limit = 30
-	}
-
-	stopwords := map[string]bool{
-		"el": true, "la": true, "los": true, "las": true, "un": true, "una": true,
-		"de": true, "del": true, "en": true, "y": true, "o": true, "que": true,
-		"es": true, "ha": true, "se": true, "con": true, "por": true,
-		"para": true, "al": true, "como": true, "su": true, "a": true,
-		"the": true, "is": true, "are": true, "in": true, "of": true, "and": true,
-		"on": true, "to": true, "for": true, "at": true,
-	}
-	// Geographic terms that appear in most PR articles — skip to focus on topic
-	geoterms := map[string]bool{
-		"puerto": true, "rico": true, "isla": true, "boricua": true,
-	}
-
-	words := strings.Fields(strings.ToLower(topic))
-	var keywords []string
-	for _, w := range words {
-		w = strings.Trim(w, "¿?¡!.,;:\"'()[]")
-		if len(w) >= 3 && !stopwords[w] && !geoterms[w] {
-			keywords = append(keywords, w)
-		}
-	}
-
-	if len(keywords) == 0 {
-		return nil, nil
-	}
-
-	// Build AND conditions: all topic keywords must match in title or summary
-	var conditions []string
-	var args []any
-	for i, kw := range keywords {
-		argN := i + 1
-		conditions = append(conditions, fmt.Sprintf(
-			"(title ILIKE '%%' || $%d || '%%' OR summary ILIKE '%%' || $%d || '%%')",
-			argN, argN))
-		args = append(args, kw)
-	}
-
-	// Exclude trashed articles
-	argN := len(args) + 1
-	q := fmt.Sprintf(`
-		SELECT id, title, source, url, canonical_url, region, published_at,
-		       clean_text, summary, image_url, status, pinned, evidence_policy,
-		       evidence_expires_at, tags, created_at
-		FROM articles
-		WHERE (%s) AND status != 'trashed'
-		ORDER BY published_at DESC NULLS LAST
-		LIMIT $%d
-	`, strings.Join(conditions, " AND "), argN)
-	args = append(args, limit)
-
-	rows, err := s.pool.Query(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("article search by keywords: %w", err)
-	}
-	defer rows.Close()
-
-	var articles []Article
-	for rows.Next() {
-		a := scanArticleFromRow(rows)
-		if a == nil {
-			return nil, fmt.Errorf("article search by keywords scan: failed")
-		}
-		articles = append(articles, *a)
-	}
-
-	return articles, rows.Err()
-}
-
-// SearchByVector finds articles semantically similar to the given embedding vector
-// using pgvector cosine distance. Returns articles with similarity above the threshold,
-// ordered by similarity. Cosine distance is 0 (identical) to 2 (opposite);
-// we convert to a 0-1 relevance score: relevance = 1 - (distance / 2).
-func (s *ArticleStore) SearchByVector(ctx context.Context, embedding []float32, limit int, minRelevance float64) ([]Article, []float64, error) {
-	if limit <= 0 {
-		limit = 15
-	}
-	if minRelevance <= 0 {
-		minRelevance = 0.55 // default: only reasonably similar
-	}
-
-	// Format embedding as pgvector string: [0.1,0.2,...]
-	parts := make([]string, len(embedding))
-	for i, v := range embedding {
-		parts[i] = fmt.Sprintf("%f", v)
-	}
-	vecStr := "[" + strings.Join(parts, ",") + "]"
-
-	// maxDist converts minRelevance to cosine distance threshold
-	// relevance = 1 - dist/2, so dist = 2*(1 - relevance)
-	maxDist := 2.0 * (1.0 - minRelevance)
-
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, title, source, url, canonical_url, region, published_at,
-		       clean_text, summary, image_url, status, pinned, evidence_policy,
-		       evidence_expires_at, tags, created_at,
-		       embedding <=> $1::vector AS distance
-		FROM articles
-		WHERE embedding IS NOT NULL
-		  AND status != 'trashed'
-		  AND (embedding <=> $1::vector) < $2
-		ORDER BY embedding <=> $1::vector
-		LIMIT $3
-	`, vecStr, maxDist, limit)
-	if err != nil {
-		return nil, nil, fmt.Errorf("article search by vector: %w", err)
-	}
-	defer rows.Close()
-
-	var articles []Article
-	var relevances []float64
-	for rows.Next() {
-		var a Article
-		var distance float64
-		var tagsJSON []byte
-		err := rows.Scan(
-			&a.ID, &a.Title, &a.Source, &a.URL, &a.CanonicalURL,
-			&a.Region, &a.PublishedAt, &a.CleanText, &a.Summary,
-			&a.ImageURL, &a.Status, &a.Pinned, &a.EvidencePolicy,
-			&a.EvidenceExpiresAt, &tagsJSON, &a.CreatedAt,
-			&distance,
-		)
-		if err != nil {
-			return nil, nil, fmt.Errorf("article search by vector scan: %w", err)
-		}
-		if tagsJSON != nil {
-			_ = json.Unmarshal(tagsJSON, &a.Tags)
-		}
-		articles = append(articles, a)
-		relevances = append(relevances, 1.0-distance/2.0)
-	}
-
-	return articles, relevances, rows.Err()
-}
-
 // ExistsByURL checks whether an article with the given URL already exists.
 func (s *ArticleStore) ExistsByURL(ctx context.Context, rawURL string) (bool, error) {
 	var exists bool
@@ -742,89 +459,4 @@ func (s *ArticleStore) ExistsByURL(ctx context.Context, rawURL string) (bool, er
 		return false, fmt.Errorf("article exists by url: %w", err)
 	}
 	return exists, nil
-}
-
-// SearchChat searches articles using OR-based keyword matching for the AI chat.
-func (s *ArticleStore) SearchChat(ctx context.Context, question string, limit int) ([]Article, error) {
-	if limit <= 0 {
-		limit = 30
-	}
-
-	stopwords := map[string]bool{
-		"el": true, "la": true, "los": true, "las": true, "un": true, "una": true,
-		"de": true, "del": true, "en": true, "y": true, "o": true, "que": true,
-		"es": true, "ha": true, "hay": true, "se": true, "con": true, "por": true,
-		"para": true, "al": true, "como": true, "más": true, "pero": true, "su": true,
-		"le": true, "lo": true, "a": true, "no": true, "si": true, "me": true,
-		"the": true, "is": true, "are": true, "in": true, "of": true, "and": true,
-		"alguien": true, "algún": true, "alguna": true, "donde": true, "quien": true,
-		"cuando": true, "cuales": true, "cual": true, "sobre": true,
-		"sido": true, "está": true, "fue": true, "fueron": true,
-		"hoy": true, "día": true, "algo": true, "todo": true, "noticias": true,
-		"dame": true, "dime": true, "sabes": true, "puedes": true, "información": true,
-	}
-
-	words := strings.Fields(strings.ToLower(question))
-	var keywords []string
-	for _, w := range words {
-		w = strings.Trim(w, "¿?¡!.,;:\"'()[]")
-		if len(w) >= 3 && !stopwords[w] {
-			// Crude Spanish stemming: truncate words ending in common suffixes.
-			// "renunciado" → "renunci", "gobierno" → "gobiern"
-			for _, suffix := range []string{"ado", "ido", "ando", "endo", "ción", "cion", "mente", "ando", "iento"} {
-				if len(w) > len(suffix)+3 && strings.HasSuffix(w, suffix) {
-					w = w[:len(w)-len(suffix)]
-					break
-				}
-			}
-			if len(w) >= 3 {
-				keywords = append(keywords, w)
-			}
-		}
-	}
-
-	if len(keywords) == 0 {
-		return nil, nil
-	}
-
-	var conditions []string
-	var args []any
-	for i, kw := range keywords {
-		argN := i + 1
-		conditions = append(conditions, fmt.Sprintf(
-			"(title ILIKE '%%' || $%d || '%%' OR summary ILIKE '%%' || $%d || '%%')",
-			argN, argN))
-		args = append(args, kw)
-	}
-
-	where := "WHERE (" + strings.Join(conditions, " OR ") + ")"
-	argN := len(args) + 1
-	args = append(args, limit)
-
-	q := fmt.Sprintf(`
-		SELECT id, title, source, url, canonical_url, region, published_at,
-		       clean_text, summary, image_url, status, pinned, evidence_policy,
-		       evidence_expires_at, tags, created_at
-		FROM articles
-		%s
-		ORDER BY published_at DESC NULLS LAST
-		LIMIT $%d
-	`, where, argN)
-
-	rows, err := s.pool.Query(ctx, q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("article search chat: %w", err)
-	}
-	defer rows.Close()
-
-	var articles []Article
-	for rows.Next() {
-		a := scanArticleFromRow(rows)
-		if a == nil {
-			return nil, fmt.Errorf("article search chat scan: failed")
-		}
-		articles = append(articles, *a)
-	}
-
-	return articles, rows.Err()
 }

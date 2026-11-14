@@ -74,7 +74,7 @@ func NewClient(ctx context.Context, cfg config.S3Config) (*Client, error) {
 
 // Configured returns true if the S3 client has a valid connection configured.
 func (c *Client) Configured() bool {
-	return c.s3 != nil
+	return c != nil && c.s3 != nil
 }
 
 // StoreEvidence compresses and uploads the raw HTML, extracted text, and

@@ -1,27 +1,20 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
-	"net/url"
-	"os/exec"
-	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/Saul-Punybz/folio/internal/crawler"
 	"github.com/Saul-Punybz/folio/internal/models"
 )
 
 // OpportunityHandler handles grant/RFP opportunity API endpoints.
 type OpportunityHandler struct {
 	Opportunities *models.OpportunityStore
-	CrawlDeps     crawler.Deps
 }
 
 // List returns paginated opportunities with optional filters.
@@ -58,7 +51,7 @@ func (h *OpportunityHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	statusCounts, _ := h.Opportunities.CountByStatus(r.Context())
 	total, _ := h.Opportunities.TotalCount(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total":    total,
+		"total":     total,
 		"by_status": statusCounts,
 	})
 }
@@ -200,39 +193,4 @@ func (h *OpportunityHandler) RefreshStatuses(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "refreshed", "updated": updated})
-}
-
-// TriggerExtraction manually triggers opportunity extraction on unchecked pages.
-func (h *OpportunityHandler) TriggerExtraction(w http.ResponseWriter, r *http.Request) {
-	go func() {
-		slog.Info("opportunities: manual extraction trigger")
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-		crawler.RunOpportunityExtraction(ctx, h.CrawlDeps, 100)
-		slog.Info("opportunities: manual extraction complete")
-	}()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "triggered", "message": "Extraction started in background"})
-}
-
-// OpenURL opens a URL in the system default browser (macOS).
-func OpenURL(w http.ResponseWriter, r *http.Request) {
-	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing url"})
-		return
-	}
-	// Validate it's a real URL
-	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "mailto") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid url"})
-		return
-	}
-	var cmd *exec.Cmd
-	if runtime.GOOS == "darwin" {
-		cmd = exec.Command("open", rawURL)
-	} else {
-		cmd = exec.Command("xdg-open", rawURL)
-	}
-	_ = cmd.Start()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "opened"})
 }

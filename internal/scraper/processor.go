@@ -41,6 +41,9 @@ var reWhitespace = regexp.MustCompile(`\s+`)
 // reBlankLines matches multiple consecutive newlines (after initial cleanup).
 var reBlankLines = regexp.MustCompile(`\n{3,}`)
 
+// reBlockTag matches closing block-level tags and <br> variants.
+var reBlockTag = regexp.MustCompile(`(?i)</(?:p|div|li|h[1-6]|tr|blockquote)\s*>|<br\s*/?>`)
+
 // CleanText strips HTML tags from the input and normalizes whitespace. It
 // preserves paragraph boundaries as single newlines.
 func CleanText(html string) string {
@@ -49,14 +52,9 @@ func CleanText(html string) string {
 	}
 
 	// Replace block-level elements with newlines to preserve paragraph structure.
-	blockTags := []string{"</p>", "</div>", "</li>", "</h1>", "</h2>", "</h3>",
-		"</h4>", "</h5>", "</h6>", "<br>", "<br/>", "<br />", "</tr>", "</blockquote>"}
-	text := html
-	for _, tag := range blockTags {
-		text = strings.ReplaceAll(strings.ToLower(text), tag, "\n")
-		// Also handle the original case.
-		text = strings.ReplaceAll(text, tag, "\n")
-	}
+	// Sin distinguir mayúsculas y SIN pasar el texto a minúsculas (antes se
+	// hacía ToLower de todo el texto y los artículos quedaban en minúsculas).
+	text := reBlockTag.ReplaceAllString(html, "\n")
 
 	// Strip all remaining HTML tags.
 	text = reHTMLTag.ReplaceAllString(text, "")

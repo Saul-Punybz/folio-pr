@@ -24,6 +24,7 @@ type FeedItem struct {
 	Published   time.Time
 	GUID        string
 	ImageURL    string
+	Categories  []string // <category> de RSS / term de Atom, tal cual vienen
 }
 
 // rssRoot is the top-level XML element for RSS 2.0 feeds.
@@ -37,13 +38,14 @@ type rssChannel struct {
 }
 
 type rssItem struct {
-	Title       string         `xml:"title"`
-	Link        string         `xml:"link"`
-	Description string         `xml:"description"`
-	PubDate     string         `xml:"pubDate"`
-	GUID        string         `xml:"guid"`
-	Enclosure   rssEnclosure   `xml:"enclosure"`
-	MediaContent []rssMedia    `xml:"content"`
+	Title        string       `xml:"title"`
+	Link         string       `xml:"link"`
+	Description  string       `xml:"description"`
+	PubDate      string       `xml:"pubDate"`
+	GUID         string       `xml:"guid"`
+	Categories   []string     `xml:"category"`
+	Enclosure    rssEnclosure `xml:"enclosure"`
+	MediaContent []rssMedia   `xml:"content"`
 }
 
 type rssEnclosure struct {
@@ -58,17 +60,23 @@ type rssMedia struct {
 
 // atomFeed is the top-level XML element for Atom feeds.
 type atomFeed struct {
-	XMLName xml.Name   `xml:"feed"`
+	XMLName xml.Name    `xml:"feed"`
 	Entries []atomEntry `xml:"entry"`
 }
 
 type atomEntry struct {
-	Title   string     `xml:"title"`
-	Links   []atomLink `xml:"link"`
-	Summary string     `xml:"summary"`
-	Content string     `xml:"content"`
-	Updated string     `xml:"updated"`
-	ID      string     `xml:"id"`
+	Title      string         `xml:"title"`
+	Links      []atomLink     `xml:"link"`
+	Summary    string         `xml:"summary"`
+	Content    string         `xml:"content"`
+	Updated    string         `xml:"updated"`
+	ID         string         `xml:"id"`
+	Categories []atomCategory `xml:"category"`
+}
+
+type atomCategory struct {
+	Term  string `xml:"term,attr"`
+	Label string `xml:"label,attr"`
 }
 
 type atomLink struct {
@@ -145,6 +153,7 @@ func parseRSS(data []byte) ([]FeedItem, error) {
 			GUID:        strings.TrimSpace(ri.GUID),
 			Published:   parseDate(ri.PubDate),
 			ImageURL:    extractRSSImageURL(ri),
+			Categories:  ri.Categories,
 		}
 		if item.GUID == "" {
 			item.GUID = item.Link
@@ -180,6 +189,13 @@ func parseAtom(data []byte) ([]FeedItem, error) {
 			Description: strings.TrimSpace(description),
 			GUID:        strings.TrimSpace(entry.ID),
 			Published:   parseDate(entry.Updated),
+		}
+		for _, c := range entry.Categories {
+			if c.Label != "" {
+				item.Categories = append(item.Categories, c.Label)
+			} else {
+				item.Categories = append(item.Categories, c.Term)
+			}
 		}
 		if item.GUID == "" {
 			item.GUID = item.Link
@@ -240,13 +256,13 @@ func parseDate(s string) time.Time {
 	}
 
 	formats := []string{
-		time.RFC1123Z,                  // Mon, 02 Jan 2006 15:04:05 -0700
-		time.RFC1123,                   // Mon, 02 Jan 2006 15:04:05 MST
-		time.RFC3339,                   // 2006-01-02T15:04:05Z07:00
-		time.RFC3339Nano,               // 2006-01-02T15:04:05.999999999Z07:00
-		"2006-01-02T15:04:05Z",         // ISO without offset
-		"2006-01-02T15:04:05",          // ISO without timezone
-		"2006-01-02",                   // Date only
+		time.RFC1123Z,          // Mon, 02 Jan 2006 15:04:05 -0700
+		time.RFC1123,           // Mon, 02 Jan 2006 15:04:05 MST
+		time.RFC3339,           // 2006-01-02T15:04:05Z07:00
+		time.RFC3339Nano,       // 2006-01-02T15:04:05.999999999Z07:00
+		"2006-01-02T15:04:05Z", // ISO without offset
+		"2006-01-02T15:04:05",  // ISO without timezone
+		"2006-01-02",           // Date only
 		"Mon, 2 Jan 2006 15:04:05 -0700",
 		"Mon, 2 Jan 2006 15:04:05 MST",
 		"02 Jan 2006 15:04:05 -0700",

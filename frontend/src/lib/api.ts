@@ -84,8 +84,6 @@ export interface WatchlistHit {
   url: string;
   url_hash: string;
   snippet: string;
-  sentiment: 'positive' | 'neutral' | 'negative' | 'unknown';
-  ai_draft: string | null;
   seen: boolean;
   created_at: string;
 }
@@ -97,78 +95,6 @@ export interface WatchlistHitsResponse {
 
 export interface UnseenCountResponse {
   unseen: number;
-}
-
-export interface ChatSession {
-  id: string;
-  user_id: string;
-  title: string;
-  messages: ChatMessage[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  sources?: { title: string; source: string; url: string }[];
-  webSources?: { title: string; source: string; url: string; snippet?: string; savable?: boolean }[];
-}
-
-export interface ResearchProject {
-  id: string;
-  user_id: string;
-  topic: string;
-  keywords: string[];
-  status: 'queued' | 'searching' | 'scraping' | 'synthesizing' | 'done' | 'failed' | 'cancelled';
-  phase: number;
-  progress: Record<string, number>;
-  dossier: string;
-  entities: { people?: string[]; organizations?: string[]; places?: string[] };
-  timeline: { date: string; event: string; source_url: string }[];
-  error_msg: string;
-  started_at: string | null;
-  finished_at: string | null;
-  created_at: string;
-  updated_at: string;
-  findings_count?: number;
-}
-
-export interface ResearchFinding {
-  id: string;
-  project_id: string;
-  url: string;
-  url_hash: string;
-  title: string;
-  snippet: string;
-  clean_text: string;
-  source_type: 'google_news' | 'bing_news' | 'web' | 'local' | 'youtube' | 'reddit' | 'deep_crawl';
-  sentiment: 'positive' | 'neutral' | 'negative' | 'unknown';
-  relevance: number;
-  image_url: string | null;
-  published_at: string | null;
-  scraped: boolean;
-  tags: string[];
-  entities: Record<string, string[]>;
-  created_at: string;
-}
-
-export interface ResearchProjectsResponse {
-  projects: ResearchProject[];
-  count: number;
-}
-
-export interface ResearchFindingsResponse {
-  findings: ResearchFinding[];
-  count: number;
-}
-
-// ── Escritos (SEO Article Generator) ─────────────────────────────
-
-export interface SEOComponentScore {
-  score: number;
-  max: number;
-  details: string;
 }
 
 // ── Crawler (Government Document Crawler) ───────────────────────
@@ -197,8 +123,6 @@ export interface CrawledPage {
   content_hash: string;
   summary: string;
   tags: string[];
-  entities: Record<string, string[]>;
-  sentiment: string;
   links_out: number;
   links_in: number;
   depth: number;
@@ -232,19 +156,6 @@ export interface CrawlLink {
   source_page_id: string;
   target_url: string;
   anchor_text: string;
-}
-
-export interface GraphNode {
-  id: string;
-  name: string;
-  type: string;
-}
-
-export interface GraphEdge {
-  source: string;
-  target: string;
-  relation_type: string;
-  strength: number;
 }
 
 export interface CrawlerStatsResponse {
@@ -290,78 +201,9 @@ export interface OpportunityStatsResponse {
   by_status: Record<string, number>;
 }
 
-export interface SEOScore {
-  total: number;
-  keyword_density: SEOComponentScore;
-  title_quality: SEOComponentScore;
-  meta_description: SEOComponentScore;
-  readability: SEOComponentScore;
-  structure: SEOComponentScore;
-  ai_cleanliness: SEOComponentScore;
-  warnings?: string[];
-}
-
-export interface ArticleSection {
-  heading: string;
-  angle: string;
-  word_target: number;
-  source_ids?: string[];
-}
-
-export interface Escrito {
-  id: string;
-  user_id: string;
-  topic: string;
-  output_format: 'auto' | 'article' | 'newsletter' | 'report' | 'memo' | 'letter' | 'email' | 'op_ed';
-  writing_style: 'auto' | 'academic' | 'journalistic' | 'executive' | 'institutional' | 'persuasive' | 'newsletter';
-  target_audience: 'general' | 'academic' | 'executive' | 'public_sector' | 'community' | 'donor';
-  citation_style: 'apa' | 'mla' | 'chicago' | 'inline';
-  slug: string;
-  title: string;
-  meta_description: string;
-  keywords: string[];
-  hashtags: string[];
-  content: string;
-  article_plan: ArticleSection[];
-  seo_score: SEOScore;
-  status: 'queued' | 'planning' | 'generating' | 'scoring' | 'verifying' | 'done' | 'failed';
-  phase: number;
-  progress: Record<string, any>;
-  publish_status: 'draft' | 'reviewing' | 'published';
-  word_count: number;
-  started_at: string | null;
-  finished_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EscritoSource {
-  id: string;
-  escrito_id: string;
-  article_id: string | null;
-  relevance: number;
-  used_in_section: string;
-  web_url: string;
-  web_title: string;
-  web_domain: string;
-  article_title: string;
-  article_source: string;
-  article_url: string;
-}
-
-export interface EscritosResponse {
-  escritos: Escrito[];
-  count: number;
-}
-
-export interface EscritoDetailResponse {
-  escrito: Escrito;
-  sources: EscritoSource[];
-}
-
 async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    credentials: 'include',
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,
@@ -369,9 +211,18 @@ async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T
     ...options,
   });
 
+  if (res.status === 401 && path !== '/login') {
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+    throw new Error('Sesión expirada');
+  }
+
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `Request failed: ${res.status}`);
+    let msg = text;
+    try { msg = JSON.parse(text).error || text; } catch { /* texto plano */ }
+    throw new Error(msg || `Request failed: ${res.status}`);
   }
 
   // Handle 204 No Content
@@ -382,7 +233,24 @@ async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T
   return res.json();
 }
 
+export interface User {
+  id: string;
+  email: string;
+  role: string;
+  created_at?: string;
+}
+
 export const api = {
+  // Auth
+  login: (email: string, password: string): Promise<{ user: User }> =>
+    fetchAPI('/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+
+  logout: (): Promise<{ status: string }> =>
+    fetchAPI('/logout', { method: 'POST' }),
+
+  me: (): Promise<User> =>
+    fetchAPI('/me'),
+
   // Items
   getItems: (status: string, limit = 200, offset = 0, date = ''): Promise<ItemsResponse> =>
     fetchAPI(`/items?status=${status}&limit=${limit}&offset=${offset}${date ? `&date=${date}` : ''}`),
@@ -406,10 +274,6 @@ export const api = {
   search: (params: Record<string, string>): Promise<SearchResponse> =>
     fetchAPI(`/search?${new URLSearchParams(params)}`),
 
-  // Similarity search
-  similar: (id: string, limit = 5): Promise<{ results: Article[]; count: number }> =>
-    fetchAPI(`/items/${id}/similar?limit=${limit}`),
-
   // Sources
   getSources: async (): Promise<Source[]> => {
     const data = await fetchAPI<{ sources: Source[]; count: number }>('/sources');
@@ -431,7 +295,6 @@ export const api = {
   quickCreateSource: (url: string, region?: string): Promise<{ source: Source; feed_type: string; detected: boolean; message: string }> =>
     fetchAPI('/sources/quick', { method: 'POST', body: JSON.stringify({ url, region: region || undefined }) }),
 
-  // Auth
   // Notes
   getNotes: (articleId: string): Promise<NotesResponse> =>
     fetchAPI(`/items/${articleId}/notes`),
@@ -484,9 +347,6 @@ export const api = {
   triggerWatchlistScan: (): Promise<{ status: string; message: string }> =>
     fetchAPI('/watchlist/scan', { method: 'POST' }),
 
-  enrichWatchlistOrg: (id: string): Promise<{ status: string; keywords: string[]; message: string }> =>
-    fetchAPI(`/watchlist/orgs/${id}/enrich`, { method: 'POST' }),
-
   getWatchlistFeedURL: (): Promise<{ url: string }> =>
     fetchAPI('/watchlist/feed-url'),
 
@@ -508,152 +368,9 @@ export const api = {
   triggerIngest: (): Promise<{ status: string; message: string }> =>
     fetchAPI('/admin/ingest', { method: 'POST' }),
 
-  // Admin: chat with news
-  chatWithNews: (question: string): Promise<{ answer: string; articles_used: number; sources?: { title: string; source: string; url: string }[]; web_sources?: { title: string; source: string; url: string; snippet?: string; savable?: boolean }[] }> =>
-    fetchAPI('/admin/chat', {
-      method: 'POST',
-      body: JSON.stringify({ question }),
-    }),
-
-  // Admin: re-enrich
-  reenrich: (): Promise<{ cleared: number; queued: number; message: string }> =>
-    fetchAPI('/admin/reenrich', { method: 'POST' }),
-
-  // Chat sessions
-  getChatSessions: (): Promise<{ sessions: ChatSession[] }> =>
-    fetchAPI('/chat/sessions'),
-
-  getChatSession: (id: string): Promise<ChatSession> =>
-    fetchAPI(`/chat/sessions/${id}`),
-
-  createChatSession: (title: string, messages: ChatMessage[]): Promise<ChatSession> =>
-    fetchAPI('/chat/sessions', {
-      method: 'POST',
-      body: JSON.stringify({ title, messages }),
-    }),
-
-  updateChatSession: (id: string, title: string, messages: ChatMessage[]): Promise<ChatSession> =>
-    fetchAPI(`/chat/sessions/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ title, messages }),
-    }),
-
-  deleteChatSession: (id: string): Promise<void> =>
-    fetchAPI(`/chat/sessions/${id}`, { method: 'DELETE' }),
-
-  // Analytics
-  getTagTrends: (days = 30): Promise<{ trends: { tag: string; day: string; count: number }[] }> =>
-    fetchAPI(`/analytics/tags?days=${days}`),
-
-  getTopEntities: (days = 30, type = ''): Promise<{ entities: { name: string; type: string; count: number }[] }> =>
-    fetchAPI(`/analytics/entities?days=${days}&type=${type}`),
-
-  getCoOccurrences: (entity: string): Promise<{ co_occurrences: { name: string; type: string; count: number }[] }> =>
-    fetchAPI(`/analytics/co-occurrences?entity=${encodeURIComponent(entity)}`),
-
-  getSentiment: (days = 30): Promise<{ sentiment: { sentiment: string; count: number }[] }> =>
-    fetchAPI(`/analytics/sentiment?days=${days}`),
-
-  getSourceHealth: (): Promise<{ sources: { source: string; article_count: number; last_ingested: string; enriched_count: number }[] }> =>
-    fetchAPI(`/analytics/sources`),
-
-  getArticleVolume: (days = 30): Promise<{ volume: { day: string; count: number }[] }> =>
-    fetchAPI(`/analytics/volume?days=${days}`),
-
   // Test scrape
   testSource: (id: string): Promise<{ success: boolean; title: string; text_length: number; image_found: boolean; error?: string }> =>
     fetchAPI(`/sources/${id}/test`, { method: 'POST' }),
-
-  // Research (Deep Investigation)
-  createResearchProject: (topic: string, keywords?: string[]): Promise<ResearchProject> =>
-    fetchAPI('/research', { method: 'POST', body: JSON.stringify({ topic, keywords: keywords || [] }) }),
-
-  getResearchProjects: (): Promise<ResearchProjectsResponse> =>
-    fetchAPI('/research'),
-
-  getResearchProject: (id: string): Promise<{ project: ResearchProject; findings_count: number }> =>
-    fetchAPI(`/research/${id}`),
-
-  getResearchFindings: (id: string, params?: { source_type?: string; limit?: number; offset?: number }): Promise<ResearchFindingsResponse> => {
-    const qs = new URLSearchParams();
-    if (params?.source_type) qs.set('source_type', params.source_type);
-    if (params?.limit) qs.set('limit', String(params.limit));
-    if (params?.offset) qs.set('offset', String(params.offset));
-    return fetchAPI(`/research/${id}/findings?${qs}`);
-  },
-
-  stopResearchProject: (id: string): Promise<{ status: string }> =>
-    fetchAPI(`/research/${id}/stop`, { method: 'POST' }),
-
-  runResearchProject: (id: string): Promise<{ status: string; message: string }> =>
-    fetchAPI(`/research/${id}/run`, { method: 'POST' }),
-
-  deleteResearchProject: (id: string): Promise<{ status: string }> =>
-    fetchAPI(`/research/${id}`, { method: 'DELETE' }),
-
-  // Escritos (SEO Article Generator)
-  createEscrito: (
-    topic: string,
-    articleIds?: string[],
-    options?: Partial<{
-      output_format: Escrito['output_format'];
-      writing_style: Escrito['writing_style'];
-      target_audience: Escrito['target_audience'];
-      citation_style: Escrito['citation_style'];
-    }>
-  ): Promise<Escrito> =>
-    fetchAPI('/escritos', {
-      method: 'POST',
-      body: JSON.stringify({
-        topic,
-        article_ids: articleIds || [],
-        output_format: options?.output_format || 'auto',
-        writing_style: options?.writing_style || 'auto',
-        target_audience: options?.target_audience || 'general',
-        citation_style: options?.citation_style || 'apa',
-      }),
-    }),
-
-  getEscritos: (): Promise<EscritosResponse> =>
-    fetchAPI('/escritos'),
-
-  getEscrito: (id: string): Promise<EscritoDetailResponse> =>
-    fetchAPI(`/escritos/${id}`),
-
-  updateEscrito: (id: string, data: Partial<{
-    title: string;
-    meta_description: string;
-    content: string;
-    keywords: string[];
-    hashtags: string[];
-    publish_status: string;
-    output_format: Escrito['output_format'];
-    writing_style: Escrito['writing_style'];
-    target_audience: Escrito['target_audience'];
-    citation_style: Escrito['citation_style'];
-  }>): Promise<Escrito> =>
-    fetchAPI(`/escritos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-
-  regenerateEscrito: (id: string): Promise<{ status: string; message: string }> =>
-    fetchAPI(`/escritos/${id}/regenerate`, { method: 'POST' }),
-
-  improveEscrito: (id: string, instructions: string): Promise<{ status: string; message: string }> =>
-    fetchAPI(`/escritos/${id}/improve`, { method: 'POST', body: JSON.stringify({ instructions }) }),
-
-  recalcSEO: (id: string): Promise<SEOScore> =>
-    fetchAPI(`/escritos/${id}/seo-score`, { method: 'POST' }),
-
-  optimizeEscritoSEO: (id: string, instructions = ''): Promise<{ status: string; message: string }> =>
-    fetchAPI(`/escritos/${id}/seo-optimize`, { method: 'POST', body: JSON.stringify({ instructions }) }),
-
-  expandEscrito: (id: string, instructions = ''): Promise<{ status: string; message: string }> =>
-    fetchAPI(`/escritos/${id}/expand`, { method: 'POST', body: JSON.stringify({ instructions }) }),
-
-  deleteEscrito: (id: string): Promise<{ status: string }> =>
-    fetchAPI(`/escritos/${id}`, { method: 'DELETE' }),
-
-  exportEscrito: (id: string, format: 'markdown' | 'html' = 'markdown'): Promise<{ format: string; content: string }> =>
-    fetchAPI(`/escritos/${id}/export`, { method: 'POST', body: JSON.stringify({ format }) }),
 
   // Crawler (Government Document Crawler)
   getCrawlerStats: (): Promise<CrawlerStatsResponse> =>
@@ -679,14 +396,8 @@ export const api = {
   getCrawlerChangedPages: (limit = 50): Promise<{ pages: CrawledPage[]; count: number }> =>
     fetchAPI(`/crawler/pages/changes?limit=${limit}`),
 
-  getCrawlerPage: (id: string): Promise<{ page: CrawledPage; links_out: CrawlLink[]; links_in: CrawlLink[]; entities: any[] }> =>
+  getCrawlerPage: (id: string): Promise<{ page: CrawledPage; links_out: CrawlLink[]; links_in: CrawlLink[] }> =>
     fetchAPI(`/crawler/pages/${id}`),
-
-  getCrawlerGraph: (limit = 50): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> =>
-    fetchAPI(`/crawler/graph?limit=${limit}`),
-
-  getCrawlerEntityRelations: (entityId: string): Promise<{ relationships: any[]; entities: any[] }> =>
-    fetchAPI(`/crawler/graph/${entityId}/relations`),
 
   getCrawlerDomains: (): Promise<{ domains: CrawlDomain[]; count: number }> =>
     fetchAPI('/crawler/domains'),
@@ -737,8 +448,5 @@ export const api = {
     fetchAPI(`/opportunities/${id}/review`, { method: 'POST' }),
 
   refreshOpportunityStatuses: (): Promise<{ status: string; updated: number }> =>
-    fetchAPI('/opportunities/refresh-statuses', { method: 'POST' }),
-
-  triggerOpportunityExtraction: (): Promise<{ status: string; message: string }> =>
-    fetchAPI('/opportunities/extract', { method: 'POST' }),
+    fetchAPI('/opportunities/refresh-statuses', { method: 'POST' })
 };

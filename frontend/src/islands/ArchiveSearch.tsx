@@ -25,11 +25,6 @@ export default function ArchiveSearch() {
   const [statusFilter, setStatusFilter] = useState('');
   const [tagFilter, setTagFilter] = useState('');
 
-  // Similar articles panel
-  const [similarResults, setSimilarResults] = useState<Article[]>([]);
-  const [similarLoading, setSimilarLoading] = useState(false);
-  const [similarForId, setSimilarForId] = useState<string | null>(null);
-  const [similarForTitle, setSimilarForTitle] = useState('');
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -111,29 +106,6 @@ export default function ArchiveSearch() {
   };
 
   const hasMore = results.length < total;
-
-  const showSimilar = async (articleId: string, articleTitle: string) => {
-    // Toggle off if clicking the same article
-    if (similarForId === articleId) {
-      setSimilarForId(null);
-      setSimilarResults([]);
-      return;
-    }
-
-    setSimilarForId(articleId);
-    setSimilarForTitle(articleTitle);
-    setSimilarLoading(true);
-    setSimilarResults([]);
-
-    try {
-      const data = await api.similar(articleId, 5);
-      setSimilarResults(data.results || []);
-    } catch (err: any) {
-      console.error('Similar articles error:', err);
-    } finally {
-      setSimilarLoading(false);
-    }
-  };
 
   const selectClass =
     'px-3 py-2 text-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-colors appearance-none';
@@ -314,7 +286,6 @@ export default function ArchiveSearch() {
             const region = regionColor(article.region);
             const status = statusColor(article.status);
             const expired = isExpired(article.evidence_expires_at);
-            const isSimilarOpen = similarForId === article.id;
             const description = article.summary || (article.clean_text ? article.clean_text.slice(0, 160) + '...' : '');
 
             return (
@@ -375,59 +346,11 @@ export default function ArchiveSearch() {
 
                   {/* Actions bar */}
                   <div className="flex items-center gap-1 px-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-800">
-                    <button
-                      onClick={() => showSimilar(article.id, article.title)}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold uppercase rounded-sm transition-colors ${
-                        isSimilarOpen ? 'bg-indigo-500/20 text-indigo-600' : 'text-zinc-500 hover:text-indigo-600'
-                      }`}
-                    >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-                      </svg>
-                      Similar
-                    </button>
                     {expired && (
-                      <span className="text-[9px] font-bold text-amber-500">Expired</span>
+                      <span className="text-[9px] font-bold text-amber-500">Vencido</span>
                     )}
                   </div>
                 </div>
-
-                {/* Similar articles panel */}
-                {isSimilarOpen && (
-                  <div className="mt-1 mb-2 pl-3 border-l-2 border-indigo-300 dark:border-indigo-700">
-                    <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 mb-2">
-                      Similar to: {similarForTitle}
-                    </p>
-                    {similarLoading ? (
-                      <div className="space-y-2">
-                        {[...Array(3)].map((_, i) => (
-                          <div key={i} className="p-2 rounded bg-zinc-50 dark:bg-zinc-800/50 animate-pulse">
-                            <div className="h-3 w-2/3 bg-zinc-200 dark:bg-zinc-700 rounded" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : similarResults.length === 0 ? (
-                      <p className="text-xs text-zinc-400 py-2">No similar articles found.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {similarResults.map((sim) => (
-                          <div key={sim.id} className="p-2 rounded bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                            <div className="flex items-center gap-2 text-[10px] text-zinc-400 mb-0.5">
-                              <span>{sim.source}</span>
-                              <span>&middot;</span>
-                              <span>{formatDate(sim.created_at)}</span>
-                            </div>
-                            <h4 className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                              {sim.url ? (
-                                <a href={sim.url} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-500 transition-colors">{sim.title}</a>
-                              ) : sim.title}
-                            </h4>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}

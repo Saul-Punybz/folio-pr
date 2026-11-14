@@ -10,13 +10,6 @@ const SOURCE_TYPES = [
   { key: 'reddit', label: 'Reddit' },
 ] as const;
 
-const SENTIMENT_STYLES: Record<string, { bg: string; text: string; label: string; pill: string }> = {
-  positive: { bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', label: 'Positivo', pill: 'bg-emerald-100 text-emerald-800' },
-  neutral: { bg: 'bg-zinc-500/10', text: 'text-zinc-600 dark:text-zinc-400', label: 'Neutral', pill: 'bg-zinc-100 text-zinc-800' },
-  negative: { bg: 'bg-red-500/10', text: 'text-red-600 dark:text-red-400', label: 'Negativo', pill: 'bg-red-100 text-red-800' },
-  unknown: { bg: 'bg-amber-500/10', text: 'text-amber-600 dark:text-amber-400', label: 'Pendiente', pill: 'bg-amber-100 text-amber-800' },
-};
-
 function timeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -104,10 +97,6 @@ export default function WatchlistManager() {
   const [formWebsite, setFormWebsite] = useState('');
   const [formKeywords, setFormKeywords] = useState('');
   const [formYouTube, setFormYouTube] = useState('');
-  const [enriching, setEnriching] = useState(false);
-
-  // Expanded drafts
-  const [expandedDraft, setExpandedDraft] = useState<string | null>(null);
 
   const fetchOrgs = useCallback(async () => {
     try {
@@ -154,37 +143,17 @@ export default function WatchlistManager() {
     const website = formWebsite.trim();
 
     try {
-      let savedOrg: import('../lib/api').WatchlistOrg;
       if (editingOrg) {
-        savedOrg = await api.updateWatchlistOrg(editingOrg.id, { name: formName, website, keywords, youtube_channels });
+        await api.updateWatchlistOrg(editingOrg.id, { name: formName, website, keywords, youtube_channels });
       } else {
-        savedOrg = await api.createWatchlistOrg({ name: formName, website, keywords, youtube_channels });
+        await api.createWatchlistOrg({ name: formName, website, keywords, youtube_channels });
       }
       setShowAddOrg(false);
       setEditingOrg(null);
       resetForm();
       await fetchOrgs();
-
-      // Auto-enrich if website was provided and org has few keywords.
-      if (website && keywords.length < 3) {
-        handleEnrichOrg(savedOrg.id);
-      }
     } catch (e) {
       console.error('Failed to save org:', e);
-    }
-  };
-
-  const handleEnrichOrg = async (orgId: string) => {
-    setEnriching(true);
-    try {
-      const result = await api.enrichWatchlistOrg(orgId);
-      if (result.status === 'enriched') {
-        await fetchOrgs();
-      }
-    } catch (e) {
-      console.error('Failed to enrich org:', e);
-    } finally {
-      setEnriching(false);
     }
   };
 
@@ -406,16 +375,6 @@ export default function WatchlistManager() {
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleEnrichOrg(org.id); }}
-                    className={`p-1 transition-colors ${enriching ? 'text-amber-500 animate-pulse' : 'text-zinc-400 hover:text-emerald-500'}`}
-                    title="Extraer palabras clave"
-                    disabled={enriching}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-                    </svg>
-                  </button>
-                  <button
                     onClick={(e) => { e.stopPropagation(); startEdit(org); }}
                     className="p-1 text-zinc-400 hover:text-indigo-500 transition-colors"
                     title="Editar"
@@ -521,8 +480,6 @@ export default function WatchlistManager() {
                 <HitCard
                   key={hit.id}
                   hit={hit}
-                  expanded={expandedDraft === hit.id}
-                  onToggleDraft={() => setExpandedDraft(expandedDraft === hit.id ? null : hit.id)}
                   onMarkSeen={() => handleMarkSeen(hit.id)}
                   onDelete={() => handleDeleteHit(hit.id)}
                 />
@@ -691,19 +648,13 @@ export default function WatchlistManager() {
 
 function HitCard({
   hit,
-  expanded,
-  onToggleDraft,
   onMarkSeen,
   onDelete,
 }: {
   hit: WatchlistHit;
-  expanded: boolean;
-  onToggleDraft: () => void;
   onMarkSeen: () => void;
   onDelete: () => void;
 }) {
-  const sentiment = SENTIMENT_STYLES[hit.sentiment] || SENTIMENT_STYLES.unknown;
-
   return (
     <div className={`overflow-hidden rounded-sm border transition-all ${
       !hit.seen
@@ -726,9 +677,6 @@ function HitCard({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-[10px] text-zinc-500">{timeAgo(hit.created_at)}</span>
-          <span className={`inline-flex items-center px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest rounded-sm ${sentiment.pill}`}>
-            {sentiment.label}
-          </span>
         </div>
       </div>
 
@@ -748,15 +696,6 @@ function HitCard({
       {hit.snippet && (
         <div className="bg-white dark:bg-zinc-900 px-3 pt-1 pb-2">
           <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed line-clamp-3">{hit.snippet}</p>
-        </div>
-      )}
-
-      {/* AI Draft expansion */}
-      {hit.ai_draft && expanded && (
-        <div className="px-3 pb-2 bg-white dark:bg-zinc-900">
-          <div className="p-3 rounded-sm bg-indigo-500/5 border border-indigo-500/20 text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">
-            {hit.ai_draft}
-          </div>
         </div>
       )}
 
@@ -783,17 +722,6 @@ function HitCard({
           </svg>
           Eliminar
         </button>
-        {hit.ai_draft && (
-          <button
-            onClick={onToggleDraft}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-indigo-500 hover:bg-indigo-500/10 rounded-sm transition-colors"
-          >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-            </svg>
-            {expanded ? 'Ocultar PR' : 'Borrador PR'}
-          </button>
-        )}
         {hit.url && (
           <a
             href={hit.url}

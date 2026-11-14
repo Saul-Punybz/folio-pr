@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,13 +32,52 @@ func NewUserStore(pool *pgxpool.Pool) *UserStore {
 	return &UserStore{pool: pool}
 }
 
+// NormalizeEmail recorta espacios y pasa a minúsculas; así se guardan y se buscan.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// List returns all users ordered by creation date.
+func (s *UserStore) List(ctx context.Context) ([]User, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, email, role, created_at FROM users ORDER BY created_at
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("user list: %w", err)
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Email, &u.Role, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("user list scan: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// SetPassword replaces the password hash (and role) of an existing user.
+func (s *UserStore) SetPassword(ctx context.Context, email, passwordHash, role string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE users SET password_hash = $2, role = $3 WHERE email = $1
+	`, email, passwordHash, role)
+	if err != nil {
+		return fmt.Errorf("user set password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user not found: %s", email)
+	}
+	return nil
+}
+
 // GetByEmail returns a user by their email address.
 func (s *UserStore) GetByEmail(ctx context.Context, email string) (*User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, email, password_hash, role, created_at
 		FROM users
-		WHERE email = $1
+		WHERE lower(email) = lower($1)
 	`, email).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("user get by email: %w", err)

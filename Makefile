@@ -1,7 +1,7 @@
 # Folio — Political Intelligence System
 # Run `make help` to see all available targets.
 
-.PHONY: dev down migrate seed build test frontend logs help
+.PHONY: dev down migrate seed build build-linux test frontend logs help
 
 # Default database connection for local development
 DB_URL ?= postgres://folio:folio_dev@localhost:5432/folio?sslmode=disable
@@ -29,10 +29,13 @@ seed:
 	psql "$(DB_URL)" -f migrations/002_seed_sources.sql
 	@echo "Seed complete."
 
-## build: Compile the API and Worker Go binaries
+## build: Compile the single folio binary (frontend/dist must be built first)
 build:
-	go build -o api ./cmd/api
-	go build -o worker ./cmd/worker
+	go build -o bin/folio ./cmd/folio
+
+## build-linux: Cross-compile folio for a Linux amd64 server
+build-linux:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/folio-linux-amd64 ./cmd/folio
 
 ## test: Run all Go tests
 test:

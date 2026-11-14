@@ -12,32 +12,32 @@ import (
 
 // CrawledPage represents a page that has been fetched by the crawler.
 type CrawledPage struct {
-	ID            uuid.UUID       `json:"id"`
-	URL           string          `json:"url"`
-	URLHash       string          `json:"url_hash"`
-	DomainID      uuid.UUID       `json:"domain_id"`
-	Title         string          `json:"title"`
-	CleanText     string          `json:"clean_text,omitempty"`
-	ContentHash   string          `json:"content_hash"`
-	Summary       string          `json:"summary"`
-	Tags          json.RawMessage `json:"tags"`
-	Entities      json.RawMessage `json:"entities"`
-	Sentiment     string          `json:"sentiment"`
-	LinksOut      int             `json:"links_out"`
-	LinksIn       int             `json:"links_in"`
-	Depth         int             `json:"depth"`
-	StatusCode    int             `json:"status_code"`
-	ContentType   string          `json:"content_type"`
-	ContentLength int             `json:"content_length"`
-	Changed       bool            `json:"changed"`
-	ChangeSummary string          `json:"change_summary"`
+	ID                 uuid.UUID       `json:"id"`
+	URL                string          `json:"url"`
+	URLHash            string          `json:"url_hash"`
+	DomainID           uuid.UUID       `json:"domain_id"`
+	Title              string          `json:"title"`
+	CleanText          string          `json:"clean_text,omitempty"`
+	ContentHash        string          `json:"content_hash"`
+	Summary            string          `json:"summary"`
+	Tags               json.RawMessage `json:"tags"`
+	Entities           json.RawMessage `json:"entities"`
+	Sentiment          string          `json:"sentiment"`
+	LinksOut           int             `json:"links_out"`
+	LinksIn            int             `json:"links_in"`
+	Depth              int             `json:"depth"`
+	StatusCode         int             `json:"status_code"`
+	ContentType        string          `json:"content_type"`
+	ContentLength      int             `json:"content_length"`
+	Changed            bool            `json:"changed"`
+	ChangeSummary      string          `json:"change_summary"`
 	Enriched           bool            `json:"enriched"`
 	OpportunityChecked bool            `json:"opportunity_checked"`
 	CrawlCount         int             `json:"crawl_count"`
-	FirstSeenAt   time.Time       `json:"first_seen_at"`
-	LastCrawledAt time.Time       `json:"last_crawled_at"`
-	NextCrawlAt   *time.Time      `json:"next_crawl_at,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
+	FirstSeenAt        time.Time       `json:"first_seen_at"`
+	LastCrawledAt      time.Time       `json:"last_crawled_at"`
+	NextCrawlAt        *time.Time      `json:"next_crawl_at,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
 }
 
 type CrawledPageStore struct {
@@ -233,41 +233,6 @@ func (s *CrawledPageStore) ListChanged(ctx context.Context, limit int) ([]Crawle
 	}
 	defer rows.Close()
 	return scanCrawledPageRows(rows)
-}
-
-func (s *CrawledPageStore) ListUnenriched(ctx context.Context, limit int) ([]CrawledPage, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, url, url_hash, domain_id, title, clean_text, content_hash,
-		       summary, tags, entities, sentiment, links_out, links_in,
-		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, opportunity_checked, crawl_count,
-		       first_seen_at, last_crawled_at, next_crawl_at, created_at
-		FROM crawled_pages
-		WHERE enriched = false AND clean_text != ''
-		ORDER BY created_at ASC
-		LIMIT $1
-	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("crawled pages list unenriched: %w", err)
-	}
-	defer rows.Close()
-	return scanCrawledPageRows(rows)
-}
-
-func (s *CrawledPageStore) UpdateEnrichment(ctx context.Context, id uuid.UUID, summary, sentiment string, tags, entities json.RawMessage, embedding []float32) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE crawled_pages
-		SET summary = $2, sentiment = $3, tags = $4, entities = $5,
-		    embedding = $6, enriched = true
-		WHERE id = $1
-	`, id, summary, sentiment, tags, entities, embedding)
-	if err != nil {
-		return fmt.Errorf("crawled page update enrichment: %w", err)
-	}
-	return nil
 }
 
 func (s *CrawledPageStore) UpdateChangeSummary(ctx context.Context, id uuid.UUID, changeSummary string) error {
