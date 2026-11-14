@@ -1,0 +1,100 @@
+{
+ "errorcode": 0,
+ "msg": "Webservice Succeeds",
+ "token": "REDACTED",
+ "data": {
+  "searchParams": {
+   "resultType": "json",
+   "searchOnly": false,
+   "oppNum": "",
+   "cfda": "",
+   "sortBy": "",
+   "oppStatuses": "forecasted|posted",
+   "startRecordNum": 0,
+   "eligibilities": "",
+   "fundingInstruments": "",
+   "fundingCategories": "",
+   "agencies": "",
+   "rows": 5,
+   "keyword": "Puerto Rico",
+   "keywordEncoded": true
+  },
+  "hitCount": 50,
+  "startRecord": 0,
+  "oppHits": [
+   {
+    "id": "345645",
+    "number": "693JJ92023",
+    "title": "State Electronic Crash Data Collection",
+    "agencyCode": "DOT-NHTSA",
+    "agency": "National Highway Traffic Safety Administration",
+    "openDate": "02/02/2023",
+    "closeDate": "",
+    "oppStatus": "forecasted",
+    "docType": "forecast",
+    "cfdaList": [
+     "20.614"
+    ]
+   },
+   {
+    "id": "361754",
+    "number": "PA-FPH-27-001",
+    "title": "Title X Family Planning Services Grants",
+    "agencyCode": "HHS-OPHS",
+    "agency": "Office of the Assistant Secretary for Health",
+    "openDate": "04/03/2026",
+    "closeDate": "01/11/2027",
+    "oppStatus": "posted",
+    "docType": "synopsis",
+    "cfdaList": [
+     "93.217"
+    ]
+   },
+   {
+    "id": "355824",
+    "number": "MP-CPI-25-001",
+    "title": "Making America Healthy Again by Addressing Dementia Disparities",
+    "agencyCode": "HHS-OPHS",
+    "agency": "Office of the Assistant Secretary for Health",
+    "openDate": "08/01/2024",
+    "closeDate": "",
+    "oppStatus": "forecasted",
+    "docType": "forecast",
+    "cfdaList": [
+     "93.137"
+    ]
+   },
+   {
+    "id": "355829",
+    "number": "MP-CPI-25-003",
+    "title": "Coordinating Center for Language Access Services",
+    "agencyCode": "HHS-OPHS",
+    "agency": "Office of the Assistant Secretary for Health",
+    "openDate": "08/01/2024",
+    "closeDate": "",
+    "oppStatus": "forecasted",
+    "docType": "forecast",
+    "cfdaList": [
+     "93.137"
+    ]
+   },
+   {
+    "id": "355830",
+    "number": "MP-CPI-25-004",
+    "title": "Promoting Access with a Language Services Assistance Symbol",
+    "agencyCode": "HHS-OPHS",
+    "agency": "Office of the Assistant Secretary for Health",
+    "openDate": "08/01/2024",
+    "closeDate": "",
+    "oppStatus": "forecasted",
+    "docType": "forecast",
+    "cfdaList": [
+     "93.137"
+    ]
+   }
+  ],
+  "suggestion": "",
+  "accessKey": "",
+  "errorMsgs": []
+ }
+}
