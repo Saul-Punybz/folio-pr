@@ -44,6 +44,18 @@ Que tres personas de la organización abran Folio en el navegador y cada mañana
 - Baldosas y tarjetas que se tocan antes que listas largas; una acción grande por pantalla.
 - Referencia de implementación: `~/Downloads/_Projects/celebrate-studio/src/styles/base.css` y `scripts/tema.mjs`.
 
+### PDF de subastas y RFP (pieza 7)
+
+Las convocatorias de municipios y gobierno central viven en PDF, no en la página. Sin IA:
+
+1. El crawler sigue cada enlace a PDF de las páginas vigiladas (por extensión y por `Content-Type`), lo descarga y guarda el archivo original con su huella.
+2. Extrae el texto con una librería, sin IA. Si el PDF es escaneado (sin texto), pasa por OCR; si el OCR no está disponible, queda marcado «escaneado» para leerlo a mano.
+3. Sobre el texto, patrones: número de subasta o RFP, fecha límite, fecha de reunión pre-subasta, monto, correo y teléfono de contacto.
+4. Sale como «posible fondo» con el PDF a la vista y los datos encontrados resaltados. Una persona confirma o descarta.
+5. El PDF queda adjunto al fondo y entra en la búsqueda. Un PDF nuevo en la misma página (enmienda, addendum) genera aviso.
+
+Por probar con PDF reales antes de prometer nada: la calidad de la librería de texto y cuántos documentos llegan escaneados. El OCR necesita un binario (Tesseract), lo que obliga a desplegar esa parte como contenedor.
+
 ### Lo que NO se construye
 
 - Servidor MCP ni llamadas a ninguna API de IA.
