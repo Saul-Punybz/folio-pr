@@ -77,7 +77,7 @@ func parseDDGLite(html string, limit int) []WebResult {
 			continue
 		}
 
-			tagEnd := strings.Index(remaining[linkIdx:], ">")
+		tagEnd := strings.Index(remaining[linkIdx:], ">")
 		if tagEnd == -1 {
 			remaining = remaining[linkIdx+14:]
 			continue

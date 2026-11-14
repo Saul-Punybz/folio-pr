@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
 
 	"github.com/Saul-Punybz/folio/internal/crawler"
+	"github.com/Saul-Punybz/folio/internal/grants"
 	"github.com/Saul-Punybz/folio/internal/scraper"
 	"github.com/Saul-Punybz/folio/internal/watch"
 )
@@ -102,32 +104,59 @@ type extraJob struct {
 	atStartup bool
 }
 
-// startCron registra y arranca las tareas programadas. Ninguna usa IA.
-func startCron(ctx context.Context, t *jobTracker, st *stores, opts cronOptions) (*cron.Cron, error) {
-	loc := cronLocation()
-	c := cron.New(
-		cron.WithLocation(loc),
-		// Si una corrida sigue cuando toca la próxima, se salta (no se apilan).
-		cron.WithChain(cron.SkipIfStillRunning(cron.DiscardLogger)),
-	)
+// jobs son las tareas de Folio, cada una con su candado. Las usan el cron,
+// la puesta al día del arranque y el botón «Buscar ahora» (TriggerCrawl).
+type jobs struct {
+	ingestion, watchScan, crawl, recrawl, extraction, grants, oppStatuses, sessionCleanup *task
+	// fondos: la cadena crawl → extracción → estados (cada 2 h).
+	fondos *task
+	// fondosFull: la cadena completa con Grants.gov (manual y arranque).
+	fondosFull *task
+}
 
+// Presupuesto de páginas/PDF por corrida del crawler.
+const (
+	cronCrawlBudget   = 500
+	manualCrawlBudget = 400
+)
+
+// crawlBudget: FOLIO_CRAWL_BUDGET cambia el presupuesto (pruebas).
+func crawlBudget(def int) int {
+	if v, err := strconv.Atoi(os.Getenv("FOLIO_CRAWL_BUDGET")); err == nil && v > 0 {
+		return v
+	}
+	return def
+}
+
+func newJobs(st *stores) *jobs {
 	ss := st.scraperStores()
 	sc := scraper.NewScraper()
-
-	ingestion := &task{name: "ingestion", timeout: 3 * time.Hour, fn: func(jobCtx context.Context) {
+	j := &jobs{}
+	j.ingestion = &task{name: "ingestion", timeout: 3 * time.Hour, fn: func(jobCtx context.Context) {
 		n := scraper.RunIngestion(jobCtx, ss, sc)
 		slog.Info("cron: ingestion done", "articles", n)
 	}}
-	watchScan := &task{name: "watchlist-scan", timeout: 2 * time.Hour, fn: func(jobCtx context.Context) {
+	j.watchScan = &task{name: "watchlist-scan", timeout: 2 * time.Hour, fn: func(jobCtx context.Context) {
 		watch.RunWatchlistScan(jobCtx, watch.Deps{Orgs: st.watchOrgs, Hits: st.watchHits, Articles: st.articles})
 	}}
-	crawl := &task{name: "crawler", timeout: 110 * time.Minute, fn: func(jobCtx context.Context) {
-		crawler.RunCrawl(jobCtx, st.crawlDeps, 500)
-	}}
-	recrawl := &task{name: "recrawl", timeout: 30 * time.Minute, fn: func(jobCtx context.Context) {
+	crawlWith := func(budget int, force bool) func(context.Context) {
+		return func(jobCtx context.Context) {
+			deps := st.crawlDeps
+			deps.ForceEntries = force
+			crawler.RunCrawl(jobCtx, deps, budget)
+		}
+	}
+	j.crawl = &task{name: "crawler", timeout: 110 * time.Minute, fn: crawlWith(crawlBudget(cronCrawlBudget), false)}
+	j.recrawl = &task{name: "recrawl", timeout: 30 * time.Minute, fn: func(jobCtx context.Context) {
 		crawler.RunRecrawl(jobCtx, st.crawlDeps)
 	}}
-	oppStatuses := &task{name: "opportunity-statuses", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
+	j.extraction = &task{name: "extraction", timeout: 60 * time.Minute, fn: func(jobCtx context.Context) {
+		crawler.RunExtraction(jobCtx, st.crawlDeps)
+	}}
+	j.grants = &task{name: "grants-gov", timeout: 15 * time.Minute, fn: func(jobCtx context.Context) {
+		crawler.RunGrants(jobCtx, st.opportunities, grants.New(nil), crawler.GrantsKeywords(jobCtx, st.settings))
+	}}
+	j.oppStatuses = &task{name: "opportunity-statuses", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
 		n, err := st.opportunities.RefreshStatuses(jobCtx)
 		if err != nil {
 			slog.Error("cron: refresh opportunity statuses", "err", err)
@@ -135,9 +164,54 @@ func startCron(ctx context.Context, t *jobTracker, st *stores, opts cronOptions)
 		}
 		slog.Info("cron: opportunity statuses refreshed", "updated", n)
 	}}
-	sessionCleanup := &task{name: "session-cleanup", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
+	j.sessionCleanup = &task{name: "session-cleanup", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
 		scraper.RunSessionCleanup(jobCtx, st.sessions)
 	}}
+	// Las cadenas esperan el candado de cada paso: nunca se encima un crawl
+	// con otro ni una extracción con otra, venga de donde venga.
+	j.fondos = &task{name: "fondos", timeout: 3 * time.Hour, fn: func(jobCtx context.Context) {
+		j.crawl.run(jobCtx, true)
+		j.extraction.run(jobCtx, true)
+		j.oppStatuses.run(jobCtx, true)
+	}}
+	manualCrawl := &task{name: "crawler-manual", timeout: 110 * time.Minute, fn: crawlWith(crawlBudget(manualCrawlBudget), true)}
+	j.fondosFull = &task{name: "fondos-completo", timeout: 4 * time.Hour, fn: func(jobCtx context.Context) {
+		// El manual comparte el candado del crawl del cron.
+		j.crawl.mu.Lock()
+		manualCrawl.run(jobCtx, true)
+		j.crawl.mu.Unlock()
+		j.extraction.run(jobCtx, true)
+		j.grants.run(jobCtx, true)
+		j.oppStatuses.run(jobCtx, true)
+	}}
+	return j
+}
+
+// trigger lanza la cadena completa de fondos en segundo plano (botón
+// «Buscar ahora»). false si ya hay una corriendo o Folio se está apagando.
+func (j *jobs) trigger(ctx context.Context, t *jobTracker) bool {
+	if !j.fondosFull.mu.TryLock() {
+		return false
+	}
+	j.fondosFull.mu.Unlock()
+	if !t.start() {
+		return false
+	}
+	go func() {
+		defer t.done()
+		j.fondosFull.run(ctx, false)
+	}()
+	return true
+}
+
+// startCron registra y arranca las tareas programadas. Ninguna usa IA.
+func startCron(ctx context.Context, t *jobTracker, j *jobs, opts cronOptions) (*cron.Cron, error) {
+	loc := cronLocation()
+	c := cron.New(
+		cron.WithLocation(loc),
+		// Si una corrida sigue cuando toca la próxima, se salta (no se apilan).
+		cron.WithChain(cron.SkipIfStillRunning(cron.DiscardLogger)),
+	)
 
 	// fromCron envuelve una tarea para el cron: cuenta en el tracker.
 	fromCron := func(tk *task) func() {
@@ -154,12 +228,13 @@ func startCron(ctx context.Context, t *jobTracker, st *stores, opts cronOptions)
 		spec string
 		tk   *task
 	}{
-		{"0 */4 * * *", ingestion},
-		{"0 1,7,13,19 * * *", watchScan},
-		{"0 */2 * * *", crawl},
-		{"0 2 * * *", recrawl},
-		{"0 6 * * *", oppStatuses},
-		{"0 4 * * *", sessionCleanup},
+		{"0 */4 * * *", j.ingestion},
+		{"0 1,7,13,19 * * *", j.watchScan},
+		{"0 */2 * * *", j.fondos},
+		{"0 2 * * *", j.recrawl},
+		{"30 5 * * *", j.grants},
+		{"0 6 * * *", j.oppStatuses},
+		{"0 4 * * *", j.sessionCleanup},
 	}
 	var startup []*task
 	for _, e := range opts.extra {
@@ -183,10 +258,11 @@ func startCron(ctx context.Context, t *jobTracker, st *stores, opts cronOptions)
 	// Corrida de arranque a los 10 s. El Add se hace AQUÍ, antes de lanzar la
 	// goroutine, para que no compita con el Wait del apagado.
 	if opts.catchUp {
-		// Lo que tocaba mientras estuvo cerrada, una vez y en este orden.
-		startup = append(startup, ingestion, crawl, recrawl, watchScan, oppStatuses)
+		// Lo que tocaba mientras estuvo cerrada, una vez y en este orden:
+		// noticias, recrawl, crawl → extracción → Grants.gov → estados, vigilancias.
+		startup = append(startup, j.ingestion, j.recrawl, j.crawl, j.extraction, j.grants, j.oppStatuses, j.watchScan)
 	} else {
-		startup = append(startup, ingestion)
+		startup = append(startup, j.ingestion)
 	}
 	if t.start() {
 		go func() {

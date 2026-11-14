@@ -10,8 +10,18 @@ import (
 
 	"github.com/gocolly/colly/v2"
 
+	"github.com/Saul-Punybz/folio/internal/pdftext"
 	"github.com/Saul-Punybz/folio/internal/scraper"
 )
+
+// UserAgent de FolioBot. Sin URL: folio.pr no es del dueño.
+const UserAgent = "FolioBot/1.0"
+
+// MaxDocumentBytes: tope de descarga (igual que pdftext).
+const MaxDocumentBytes = 40 << 20
+
+// fetchTimeout: tope por petición (un PDF de 40 MB en una conexión lenta).
+const fetchTimeout = 90 * time.Second
 
 // DiscoveredLink represents a link found on a crawled page.
 type DiscoveredLink struct {
@@ -30,30 +40,32 @@ type FetchResult struct {
 	ContentHash   string
 	ContentType   string
 	ContentLength int
+	Body          []byte // cuerpo tal cual (para PDF)
+	IsPDF         bool   // por Content-Type o firma %PDF-
+	TooLarge      bool   // pasó de MaxDocumentBytes: se descarta
+	FinalURL      string // tras redirecciones
 	Links         []DiscoveredLink
 	ImageURL      string
 	Description   string
 	PublishDate   string
 }
 
-// FetchPage fetches a single page and extracts content + links. Uses a fresh
-// Colly collector with respectful rate limiting.
+// FetchPage fetches a single page (HTML o PDF) and extracts content + links.
+// Uses a fresh Colly collector; la pausa entre peticiones al mismo host y
+// robots.txt los maneja RunCrawl antes de llamar aquí.
 func FetchPage(ctx context.Context, pageURL string, allowedDomains map[string]bool) (*FetchResult, error) {
 	c := colly.NewCollector(
-		colly.UserAgent("FolioBot/1.0 (+https://folio.pr)"),
+		colly.UserAgent(UserAgent),
 		colly.AllowURLRevisit(),
 		colly.MaxDepth(0),
+		// Un byte más que el tope: si llega a eso, el archivo era más grande
+		// (Colly corta en silencio).
+		colly.MaxBodySize(MaxDocumentBytes+1),
 	)
-
-	_ = c.Limit(&colly.LimitRule{
-		DomainGlob:  "*",
-		Parallelism: 2,
-		Delay:       1 * time.Second,
-		RandomDelay: 500 * time.Millisecond,
-	})
+	c.SetRequestTimeout(fetchTimeout)
 
 	c.OnRequest(func(r *colly.Request) {
-		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.9,*/*;q=0.8")
 		r.Headers.Set("Accept-Language", "en-US,en;q=0.9,es;q=0.8")
 	})
 
@@ -73,9 +85,17 @@ func FetchPage(ctx context.Context, pageURL string, allowedDomains map[string]bo
 	c.OnResponse(func(r *colly.Response) {
 		mu.Lock()
 		result.StatusCode = r.StatusCode
-		result.RawHTML = string(r.Body)
 		result.ContentType = r.Headers.Get("Content-Type")
 		result.ContentLength = len(r.Body)
+		result.FinalURL = r.Request.URL.String()
+		if len(r.Body) > MaxDocumentBytes {
+			result.TooLarge = true
+		} else if pdftext.IsPDF(result.ContentType, r.Body) {
+			result.IsPDF = true
+			result.Body = r.Body
+		} else {
+			result.RawHTML = string(r.Body)
+		}
 		mu.Unlock()
 	})
 
@@ -108,7 +128,12 @@ func FetchPage(ctx context.Context, pageURL string, allowedDomains map[string]bo
 		if parseErr != nil {
 			return
 		}
-		abs := parsedBase.ResolveReference(parsed)
+		base := parsedBase
+		if e.Request != nil && e.Request.URL != nil {
+			base = e.Request.URL // tras redirección, los relativos van contra la URL final
+		}
+		abs := base.ResolveReference(parsed)
+		abs.Fragment = ""
 		absStr := abs.String()
 
 		linkDomain := strings.ToLower(abs.Hostname())
@@ -160,8 +185,12 @@ func FetchPage(ctx context.Context, pageURL string, allowedDomains map[string]bo
 		return &result, scrErr
 	}
 
+	if result.TooLarge {
+		return &result, fmt.Errorf("fetch %s: archivo de más de %d MB", pageURL, MaxDocumentBytes>>20)
+	}
+
 	// Extract article content (strips nav, footer, sidebar, ads, scripts)
-	if result.RawHTML != "" {
+	if result.RawHTML != "" && !result.IsPDF {
 		var meta scraper.ArticleMeta
 		result.CleanText, meta = scraper.ExtractArticle(result.RawHTML)
 		result.ContentHash = scraper.HashContent(result.CleanText)

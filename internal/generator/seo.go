@@ -8,14 +8,14 @@ import (
 
 // SEOScore holds the structured breakdown of an article's SEO quality.
 type SEOScore struct {
-	Total           int              `json:"total"`
-	KeywordDensity  ComponentScore   `json:"keyword_density"`
-	TitleQuality    ComponentScore   `json:"title_quality"`
-	MetaDescription ComponentScore   `json:"meta_description"`
-	Readability     ComponentScore   `json:"readability"`
-	Structure       ComponentScore   `json:"structure"`
-	AICleanliness   ComponentScore   `json:"ai_cleanliness"`
-	Warnings        []string         `json:"warnings,omitempty"`
+	Total           int            `json:"total"`
+	KeywordDensity  ComponentScore `json:"keyword_density"`
+	TitleQuality    ComponentScore `json:"title_quality"`
+	MetaDescription ComponentScore `json:"meta_description"`
+	Readability     ComponentScore `json:"readability"`
+	Structure       ComponentScore `json:"structure"`
+	AICleanliness   ComponentScore `json:"ai_cleanliness"`
+	Warnings        []string       `json:"warnings,omitempty"`
 }
 
 // ComponentScore holds a single SEO component's score.

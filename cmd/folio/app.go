@@ -262,5 +262,6 @@ func runApp() (retErr error) {
 			},
 		},
 		onReady: openBrowser,
+		dataDir: root,
 	})
 }

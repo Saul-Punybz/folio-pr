@@ -11,5 +11,31 @@ import SourcesManager from '../islands/SourcesManager';
     </div>
 
     <SourcesManager client:load />
+
+    <div class="card space-y-3">
+      <button type="button" id="close-folio" class="btn btn-soft">Cerrar Folio</button>
+      <p id="close-folio-done" class="text-base font-semibold" role="status" hidden>
+        Folio se cerró. Ya puedes cerrar esta pestaña.
+      </p>
+    </div>
   </div>
 </Layout>
+
+<script is:inline data-astro-rerun>
+  (function () {
+    var btn = document.getElementById('close-folio');
+    var done = document.getElementById('close-folio-done');
+    if (!btn || !done) return;
+    btn.addEventListener('click', async function () {
+      btn.disabled = true;
+      try {
+        var res = await fetch('/api/shutdown', { method: 'POST', credentials: 'same-origin' });
+        if (!res.ok && res.status !== 202) throw new Error('HTTP ' + res.status);
+        btn.hidden = true;
+        done.hidden = false;
+      } catch (e) {
+        btn.disabled = false;
+      }
+    });
+  })();
+</script>

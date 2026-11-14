@@ -1,276 +1,81 @@
 # Folio
 
-**Political Intelligence & Evidence Archive for Puerto Rico**
+App de Mac para una organización sin fines de lucro de Puerto Rico. Cada mañana
+se abre Folio y se ve, **sin IA**, lo que salió de sus marcas en las noticias y
+los **fondos abiertos** (subastas, RFP, grants) en cuatro niveles: federal,
+gobierno central (estatal), municipio y local.
 
-A self-hosted, AI-powered platform for monitoring, analyzing, and archiving news from Puerto Rico and federal sources. Built for journalists, researchers, NGOs, and anyone who needs to track political developments, government grants, and public accountability.
+> Hecho por [Saul A. González Alonso](https://github.com/Saul-Punybz).
 
-> **Made by [Saul A. Gonzalez Alonso](https://github.com/Saul-Punybz) -- saul@puny.bz**
+## Qué hace
 
----
+- **Noticias:** RSS y páginas de medios de PR; el resumen es la descripción del medio.
+- **Vigilancias:** marcas, personas y temas por términos.
+- **Fondos:** FolioBot rastrea páginas de subastas y avisos del gobierno (Registro
+  Único de Subastas, ASG, agencias y municipios), baja los PDF enlazados, saca su
+  texto y encuentra por patrones la referencia, la fecha límite, el monto y el
+  contacto. Además consulta la API pública de Grants.gov. Todo entra como
+  «posible fondo»: la persona lo confirma o lo descarta, y lo descartado no vuelve.
+- **Guardados y exportación** de artículos.
 
-## What It Does
+Nada usa IA: ni Ollama ni servicios externos de IA. No hay Docker, S3 ni Caddy.
 
-Folio continuously ingests news from 25+ sources across Puerto Rico, classifies them with AI, and provides tools to research, save, and export evidence.
+## Cómo está hecho
 
-- **Automated News Ingestion** -- RSS feeds and HTML scraping from Puerto Rico media outlets, federal agencies, and grant databases
-- **AI-Powered Analysis** -- Local LLM (Ollama) generates summaries, tags, and vector embeddings for every article
-- **Smart Search** -- Full-text search + semantic similarity via pgvector embeddings
-- **AI Chat (Inteligencia)** -- Ask questions about collected news in natural language; combines local archive with live web search
-- **Chat History** -- AI conversations persist across sessions for future reference
-- **Watchlist Monitoring** -- Track organizations with multi-engine web search (DuckDuckGo + Bing) and sentiment analysis
-- **Evidence Archive** -- Save, pin, annotate, and export articles as ZIP evidence packages
-- **Daily Briefs** -- AI-generated news summaries delivered automatically
-- **RSS Feed Output** -- Generate personal RSS feeds from watchlist alerts
-
-## Screenshots
-
-| Inbox | AI Chat | Saved |
-|-------|---------|-------|
-| Newspaper-style grid with filtering | Ask questions, save web sources | Evidence archive with reader panel |
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Backend** | Go 1.22+ with [Chi](https://github.com/go-chi/chi) router |
-| **Frontend** | [Astro 4](https://astro.build) + React Islands + Tailwind CSS |
-| **Database** | PostgreSQL 17 + [pgvector](https://github.com/pgvector/pgvector) |
-| **AI** | [Ollama](https://ollama.ai) -- llama3.2:3b (analysis) + nomic-embed-text (embeddings) |
-| **Scraping** | [Colly](https://github.com/gocolly/colly) + Go RSS parser |
-| **Deployment** | Docker Compose, designed for Oracle Free Tier ARM |
-| **Reverse Proxy** | Caddy (auto-HTTPS) |
-| **Object Storage** | S3-compatible (Oracle Object Storage) |
-
-## Architecture
+Un solo binario de Go (`cmd/folio`) con la API (Chi), el frontend (Astro + React)
+y las migraciones embebidos, y las tareas programadas (cron) adentro. En la Mac,
+`Folio.app` trae además un Postgres 18 embebido: no hace falta instalar nada.
 
 ```
-                    +------------------+
-                    |   Caddy (HTTPS)  |
-                    +--------+---------+
-                             |
-                    +--------v---------+
-                    |   Go API Server  |----> PostgreSQL + pgvector
-                    |   (Chi Router)   |----> Ollama (AI)
-                    +--------+---------+----> S3 Storage
-                             |
-              +--------------+--------------+
-              |                             |
-     +--------v--------+          +--------v--------+
-     | Astro Frontend   |          |   Go Worker     |
-     | React Islands    |          | RSS Ingestion   |
-     | Tailwind CSS     |          | AI Enrichment   |
-     +------------------+          | Brief Generator |
-                                   +-----------------+
-```
-
-### Project Structure
-
-```
-cmd/
-  api/           -- HTTP server entry point
-  worker/        -- Background worker (cron jobs)
+cmd/folio/        binario: servidor, modo app, cron, `folio user`
 internal/
-  ai/            -- Ollama client (summarize, classify, embed, chat)
-  agents/        -- Watchlist scanning agents (Google, Bing, web, Reddit, YouTube)
-  config/        -- Environment configuration
-  db/            -- PostgreSQL connection + auto-migrations
-  handlers/      -- HTTP handlers (items, search, chat, watchlist, briefs, export, admin)
-  middleware/    -- Session auth, admin check
-  models/        -- Database models + queries
-  scraper/       -- RSS parser, HTML scraper, ingestion pipeline
-  storage/       -- S3 object storage client
-frontend/
-  src/islands/   -- React interactive components
-  src/lib/       -- API client, utilities
-  src/layouts/   -- Astro layouts (sidebar navigation)
-  src/pages/     -- 8 pages (inbox, saved, archive, brief, watchlist, settings, login)
-migrations/      -- 9 SQL migration files (auto-applied on startup)
-scripts/         -- Setup, deployment, and Ollama initialization
-configs/         -- Caddyfile for reverse proxy
+  crawler/        FolioBot: cola, robots.txt, PDF, listados en filas, fondos, Grants.gov
+  extract/        patrones de convocatorias (fecha límite, referencia, monto, contacto)
+  pdftext/        texto de PDF en Go puro
+  robots/         robots.txt por host
+  grants/         cliente de la API de Grants.gov
+  embeddb/        Postgres embebido (datos en ~/Library/Application Support/Folio2)
+  handlers/ models/ middleware/ scraper/ watch/ ...
+migrations/       SQL, se aplican solos al arrancar
+frontend/         Astro + React
+scripts/          build-macos.sh
 ```
 
-## Features
-
-### News Monitoring
-- 25+ configured sources (El Nuevo Dia, Primera Hora, Metro PR, NotiCel, Radio Isla, News is My Business, GAO, CBO, Federal Register, Grants.gov, and more)
-- RSS + HTML scraping with multiple selector strategies
-- Automatic deduplication via URL fingerprinting
-- 6 ingestion runs per day
-
-### AI Enrichment
-- Every article gets an AI-generated summary (Spanish)
-- Automatic tag classification (politics, education, health, infrastructure, etc.)
-- Vector embeddings for semantic similarity search
-- Garbage detection clears low-quality AI outputs
-
-### Inbox Triage
-- Newspaper-style 4-column responsive grid
-- Filter by tag, source, region, or search text
-- Slide-in reader panel (no page navigation)
-- Keyboard shortcuts: J/K navigate, S save, T trash, P pin, Enter expand, ESC close
-- Collect articles by URL from any site
-
-### AI Chat (Inteligencia)
-- Natural language questions about Puerto Rico news
-- Combines local article archive + live multi-engine web search
-- Shows local sources and web sources with direct links
-- Save web sources directly to your archive with one click
-- Persistent chat sessions with history sidebar
-- Quick question buttons for common topics
-
-### Watchlist
-- Monitor organizations, politicians, or topics
-- Multi-engine search (DuckDuckGo + Bing News)
-- Sentiment analysis (positive/neutral/negative)
-- AI-drafted reports for each alert
-- Personal RSS feed for watchlist alerts
-- Unseen count badge
-
-### Evidence Management
-- Save articles with retention policies (3m, 6m, 12m, keep forever)
-- Pin important articles
-- Add notes/annotations to any article
-- Export as ZIP evidence packages
-- Archive search with multiple filters
-
-### Daily Briefs
-- AI-generated news summaries from recent articles
-- Manual "Generate Brief Now" button
-- Historical brief archive
-
-## Getting Started
-
-### Prerequisites
-
-- Go 1.22+
-- Node.js 18+
-- PostgreSQL 17 with pgvector extension
-- Ollama with `llama3.2:3b` and `nomic-embed-text` models
-
-### Quick Start
+## Construir
 
 ```bash
-# Clone
-git clone https://github.com/Saul-Punybz/folio-pr.git
-cd folio-pr
-
-# Set up environment
-cp .env.example .env
-# Edit .env with your database credentials
-
-# Install Ollama models
-ollama pull llama3.2:3b
-ollama pull nomic-embed-text
-
-# Build
-go build -o bin/api ./cmd/api
-cd frontend && npm install && npm run build && cd ..
-
-# Run (migrations apply automatically)
-./bin/api
-
-# Open http://localhost:8080
-# Default login: admin@folio.local / admin
+make mac          # = bash scripts/build-macos.sh → build/Folio.app y build/Folio.zip
 ```
 
-### Docker Compose
+Requisitos para compilar: Go, curl y npm (si falta `frontend/dist`). El script baja
+y verifica (SHA-256) los binarios de Postgres.
+
+Otras tareas:
 
 ```bash
-docker compose up -d --build
-bash scripts/setup-ollama.sh
+cd frontend && npm install && npm run build   # frontend
+go build ./... && go vet ./... && go test ./... # Go (las pruebas con base usan build/Folio.app)
+make run-app                                    # la app en primer plano, sin abrir navegador
 ```
 
-### Environment Variables
+## Usuarios
 
-See [`.env.example`](.env.example) for all configuration options:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DB_HOST` | PostgreSQL host | `localhost` |
-| `DB_PORT` | PostgreSQL port | `5432` |
-| `DB_USER` | Database user | `folio` |
-| `DB_PASS` | Database password | `folio_dev` |
-| `DB_NAME` | Database name | `folio` |
-| `SERVER_PORT` | API server port | `:8080` |
-| `OLLAMA_HOST` | Ollama API URL | `http://localhost:11434` |
-| `OLLAMA_INSTRUCT_MODEL` | LLM for summaries/chat | `llama3.2:3b` |
-| `OLLAMA_EMBED_MODEL` | Embedding model | `nomic-embed-text` |
-
-## API Endpoints
-
-### Public
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/health` | Health check |
-| `POST` | `/api/login` | Authenticate |
-| `GET` | `/feed/{token}.xml` | Watchlist RSS feed |
-
-### Authenticated
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/items` | List articles by status |
-| `POST` | `/api/items/{id}/save` | Save article |
-| `POST` | `/api/items/{id}/trash` | Trash article |
-| `POST` | `/api/items/{id}/pin` | Toggle pin |
-| `POST` | `/api/collect` | Collect article by URL |
-| `GET` | `/api/search` | Full-text search |
-| `GET` | `/api/items/{id}/similar` | Semantic similarity |
-| `GET/POST` | `/api/items/{id}/notes` | Article notes |
-| `GET/POST` | `/api/briefs/*` | Daily briefs |
-| `GET/POST/PUT/DELETE` | `/api/chat/sessions/*` | Chat sessions |
-| `GET/POST/PUT/DELETE` | `/api/watchlist/*` | Watchlist management |
-| `GET` | `/api/items/{id}/export` | Export as ZIP |
-
-### Admin
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/admin/chat` | AI chat with news |
-| `POST` | `/api/admin/ingest` | Trigger ingestion |
-| `POST` | `/api/admin/reenrich` | Re-enrich articles |
-
-## Database
-
-9 migrations auto-applied on startup:
-
-1. `001_init.sql` -- Core tables (articles, users, sessions, sources)
-2. `002_seed_sources.sql` -- Pre-configured PR news sources
-3. `003_phase2_enhancements.sql` -- Notes, search indexes, embeddings
-4. `004_phase3_briefs_alerts.sql` -- Daily briefs, alerts system
-5. `005_add_image_url.sql` -- Article images
-6. `006_fix_regions_retag.sql` -- Region corrections
-7. `007_watchlist.sql` -- Watchlist organizations + hits
-8. `008_feed_token.sql` -- RSS feed tokens
-9. `009_chat_sessions.sql` -- AI chat session persistence
-
-## Deployment
-
-Designed for **Oracle Cloud Free Tier** (ARM, 24GB RAM):
+No hay usuario por defecto. La primera vez, la app pide crear la cuenta de
+administración. También se pueden crear por terminal (con Folio abierto o cerrado):
 
 ```bash
-bash scripts/deploy-oracle.sh
+FOLIO_PASSWORD='...' build/Folio.app/Contents/MacOS/Folio user add persona@org.org admin
+build/Folio.app/Contents/MacOS/Folio user list
 ```
 
-Uses Docker Compose with Caddy for automatic HTTPS via DuckDNS.
+## Datos
 
-## News Sources
+- Base, respaldos diarios y registros: `~/Library/Application Support/Folio2/`.
+- PDF de los fondos: `…/Folio2/documentos/<sha256>.pdf`.
+- Fuera del modo app (`folio serve` con `DB_*`), los PDF van a `FOLIO_DATA_DIR` (por defecto `./data`).
 
-### Puerto Rico Media
-El Nuevo Dia, Primera Hora, Metro PR, NotiCel, Radio Isla, Caribbean Business, El Vocero, Es Noticia PR, Noticentro, TeleOnce, Telemundo PR, Univision PR, WAPA TV, News is My Business, CPI (Centro de Periodismo Investigativo), El Calce, Jay Fonseca
+Para cerrar Folio: Ajustes → «Cerrar Folio».
 
-### Government
-La Fortaleza, Senado de PR, Camara de Representantes
+## Licencia
 
-### Federal
-GAO Reports, CBO Reports, Federal Register, GovInfo, Grants.gov
-
-## Contributing
-
-Contributions are welcome. Please open an issue first to discuss what you would like to change.
-
-## License
-
-See [LICENSE](LICENSE) for details.
-
----
-
-**Made by [Saul A. Gonzalez Alonso](https://github.com/Saul-Punybz) -- saul@puny.bz**
+Ver [LICENSE](LICENSE).

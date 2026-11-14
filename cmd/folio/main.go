@@ -20,7 +20,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	_ "time/tzdata" // zonas horarias dentro del binario (servidor sin tzdata)
@@ -95,6 +97,20 @@ type serverOptions struct {
 	listener net.Listener
 	cron     cronOptions
 	onReady  func() // tras quedar escuchando (abrir el navegador)
+	// dataDir: carpeta de datos (PDF en dataDir/documentos).
+	dataDir string
+}
+
+// localDataDir: FOLIO_DATA_DIR, o ./data junto a donde corre `folio`.
+func localDataDir() string {
+	d := os.Getenv("FOLIO_DATA_DIR")
+	if d == "" {
+		d = "data"
+	}
+	if abs, err := filepath.Abs(d); err == nil {
+		d = abs
+	}
+	return d
 }
 
 func serve() error {
@@ -108,7 +124,7 @@ func serve() error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", cfg.Server.Addr(), err)
 	}
-	return runServer(ctx, serverOptions{db: cfg.DB, listener: ln})
+	return runServer(ctx, serverOptions{db: cfg.DB, listener: ln, dataDir: localDataDir()})
 }
 
 // runServer conecta la base, aplica migraciones, sirve HTTP en o.listener y
@@ -129,14 +145,29 @@ func runServer(ctx context.Context, o serverOptions) error {
 		return fmt.Errorf("embedded frontend: %w", err)
 	}
 
-	st := newStores(pool)
-	handler := newRouter(st, frontendFS)
+	if err := os.MkdirAll(o.dataDir, 0o700); err != nil {
+		o.listener.Close()
+		return fmt.Errorf("carpeta de datos %s: %w", o.dataDir, err)
+	}
+	st := newStores(pool, o.dataDir)
 
 	// Cron. jobCtx se cancela al apagar para que los trabajos en curso paren.
 	jobCtx, jobCancel := context.WithCancel(context.Background())
 	defer jobCancel()
 	tracker := &jobTracker{}
-	scheduler, err := startCron(jobCtx, tracker, st, o.cron)
+	j := newJobs(st)
+
+	// POST /api/shutdown: el mismo apagado que SIGTERM.
+	shutdownReq := make(chan struct{})
+	var shutdownOnce sync.Once
+	requestShutdown := func() { shutdownOnce.Do(func() { close(shutdownReq) }) }
+
+	handler := newRouter(st, frontendFS, routerHooks{
+		trigger:  func() bool { return j.trigger(jobCtx, tracker) },
+		shutdown: requestShutdown,
+	})
+
+	scheduler, err := startCron(jobCtx, tracker, j, o.cron)
 	if err != nil {
 		o.listener.Close()
 		return err
@@ -166,6 +197,8 @@ func runServer(ctx context.Context, o serverOptions) error {
 	select {
 	case <-ctx.Done():
 		slog.Info("folio: shutdown signal received")
+	case <-shutdownReq:
+		slog.Info("folio: shutdown requested from the app")
 	case err, ok := <-serverErr:
 		if ok && err != nil {
 			runErr = fmt.Errorf("http server: %w", err)

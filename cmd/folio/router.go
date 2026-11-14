@@ -29,12 +29,16 @@ type stores struct {
 	watchOrgs     *models.WatchlistOrgStore
 	watchHits     *models.WatchlistHitStore
 	opportunities *models.OpportunityStore
+	settings      *models.SettingsStore
 	crawlDeps     crawler.Deps
+	dataDir       string
 }
 
-func newStores(pool *pgxpool.Pool) *stores {
+func newStores(pool *pgxpool.Pool, dataDir string) *stores {
 	opps := models.NewOpportunityStore(pool)
 	return &stores{
+		dataDir:       dataDir,
+		settings:      models.NewSettingsStore(pool),
 		articles:      models.NewArticleStore(pool),
 		users:         models.NewUserStore(pool),
 		sessions:      models.NewSessionStore(pool),
@@ -51,8 +55,16 @@ func newStores(pool *pgxpool.Pool) *stores {
 			Links:         models.NewCrawlLinkStore(pool),
 			Runs:          models.NewCrawlRunStore(pool),
 			Opportunities: opps,
+			Documents:     models.NewDocumentStore(pool),
+			DataDir:       dataDir,
 		},
 	}
+}
+
+// routerHooks: lo que el router necesita del proceso (cron y apagado).
+type routerHooks struct {
+	trigger  func() bool // cadena de fondos en segundo plano
+	shutdown func()      // apagado ordenado (igual que SIGTERM)
 }
 
 func (s *stores) scraperStores() scraper.Stores {
@@ -61,7 +73,7 @@ func (s *stores) scraperStores() scraper.Stores {
 
 // newRouter arma el router: API bajo /api (con sesión salvo health y login),
 // el feed RSS público por token, y el frontend embebido para todo lo demás.
-func newRouter(st *stores, frontendFS fs.FS) http.Handler {
+func newRouter(st *stores, frontendFS fs.FS, hooks routerHooks) http.Handler {
 	sc := scraper.NewScraper()
 
 	authH := &handlers.AuthHandler{Users: st.users, Sessions: st.sessions}
@@ -73,7 +85,7 @@ func newRouter(st *stores, frontendFS fs.FS) http.Handler {
 	watchH := &handlers.WatchlistHandler{Orgs: st.watchOrgs, Hits: st.watchHits, Articles: st.articles}
 	exportH := &handlers.ExportHandler{Articles: st.articles, Notes: st.notes}
 	feedH := &handlers.FeedHandler{Users: st.users, Hits: st.watchHits}
-	oppH := &handlers.OpportunityHandler{Opportunities: st.opportunities}
+	oppH := &handlers.OpportunityHandler{Opportunities: st.opportunities, DataDir: st.dataDir}
 	adminH := &handlers.AdminHandler{
 		Articles: st.articles, Sources: st.sources, Fingerprints: st.fingerprints,
 		Scraper: sc,
@@ -81,7 +93,7 @@ func newRouter(st *stores, frontendFS fs.FS) http.Handler {
 	cd := st.crawlDeps
 	crawlerH := &handlers.CrawlerHandler{
 		Domains: cd.Domains, Queue: cd.Queue, Pages: cd.Pages, Links: cd.Links, Runs: cd.Runs,
-		CrawlDeps: cd,
+		CrawlDeps: cd, Trigger: hooks.trigger,
 	}
 
 	// 5 intentos de login por minuto por IP.
@@ -102,14 +114,17 @@ func newRouter(st *stores, frontendFS fs.FS) http.Handler {
 	r.Get("/api/setup", setupH.Status)
 	r.With(middleware.RateLimit(loginLimiter)).Post("/api/setup", setupH.Create)
 	r.Get("/feed/{token}.xml", feedH.ServeFeed)
+	// Cerrar sesión siempre limpia la cookie y responde 200, aunque la
+	// sesión esté vencida o falte.
+	r.Post("/api/logout", authH.Logout)
 
 	// ── Con sesión ────────────────────────────────────────────────
 	r.Group(func(r chi.Router) {
 		r.Use(chimw.Timeout(60 * time.Second))
 		r.Use(middleware.SessionAuth(st.sessions, st.users))
 
-		r.Post("/api/logout", authH.Logout)
 		r.Get("/api/me", authH.Me)
+		r.Post("/api/shutdown", handlers.Shutdown(hooks.shutdown))
 
 		r.Get("/api/items", itemsH.ListItems)
 		r.Post("/api/items/{id}/save", itemsH.SaveItem)
@@ -165,6 +180,7 @@ func newRouter(st *stores, frontendFS fs.FS) http.Handler {
 			r.Get("/stats", oppH.Stats)
 			r.Get("/search", oppH.Search)
 			r.Get("/{id}", oppH.Get)
+			r.Get("/{id}/document", oppH.Document)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireAdmin)
 				r.Put("/{id}", oppH.Update)
@@ -236,14 +252,15 @@ func staticHandler(frontendFS fs.FS) http.Handler {
 			return
 		}
 
-		// No existe: 404.html de Astro si lo hay, si no index.html.
+		// No existe: 404 (el 404.html de Astro si lo hay). Antes caía en la
+		// raíz con 200 y una ruta mal escrita parecía una página buena.
 		if serveHTML(w, frontendFS, "404.html", http.StatusNotFound) {
 			return
 		}
-		if serveHTML(w, frontendFS, "index.html", http.StatusOK) {
-			return
-		}
-		http.NotFound(w, req)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, notFoundPage)
 	})
 }
 
@@ -262,3 +279,9 @@ func serveHTML(w http.ResponseWriter, fsys fs.FS, name string, status int) bool 
 	_, _ = io.Copy(w, f)
 	return true
 }
+
+const notFoundPage = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Folio · No existe</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:#1c1b1f}
+@media (prefers-color-scheme:dark){body{background:#141218;color:#e6e0e9}}a{color:inherit;font-weight:600}</style></head>
+<body><main><h1>Esta página no existe</h1><p><a href="/inbox">Volver a Folio</a></p></main></body></html>`

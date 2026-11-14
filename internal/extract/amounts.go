@@ -187,3 +187,33 @@ func (d *doc) findAmount() (amountHit, bool) {
 	}
 	return *best, true
 }
+
+// AmountCents convierte un monto escrito a mano ("$50,000", "$1.5 millones",
+// "250,000 dólares") a centavos. Es el único parser de montos de Folio: usa
+// las mismas reglas que Opportunity y, si el texto es solo la cifra (sin
+// contexto), toma la primera. 0 si no hay cifra reconocible.
+func AmountCents(s string) int64 {
+	d := newDoc(s)
+	if len(d.flat) == 0 {
+		return 0
+	}
+	if a, ok := d.findAmount(); ok {
+		return a.cents
+	}
+	if m := reAmount.FindStringSubmatch(d.fold); m != nil {
+		mult := m[3]
+		if mult == "" {
+			mult = m[4]
+		}
+		if c, ok := parseAmount(m[1], m[2], mult); ok {
+			return c
+		}
+	}
+	if m := reAmountWords.FindStringSubmatch(d.fold); m != nil {
+		ip, fr, _ := strings.Cut(m[1], ".")
+		if c, ok := parseAmount(ip, fr, ""); ok {
+			return c
+		}
+	}
+	return 0
+}

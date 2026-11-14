@@ -1,5 +1,5 @@
 -- Migration 006: Fix region constraints, clean garbage tags, fix RSS URLs
--- Run: /opt/homebrew/Cellar/postgresql@17/17.9/bin/psql -U folio -d folio -f migrations/006_fix_regions_retag.sql
+-- Run: psql -U folio -d folio -f migrations/006_fix_regions_retag.sql
 
 -- ── 1. Fix region CHECK constraints ────────────────────────────
 -- Widen allowed regions from ('PR','Grants') to ('PR','Grants','Federal','Local')

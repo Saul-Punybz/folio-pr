@@ -652,7 +652,7 @@ function EditModal({ opp, onClose, onSaved }: { opp: Opportunity; onClose: () =>
     try {
       await api.updateOpportunity(opp.id, {
         title: title.trim(),
-        deadline: deadline || undefined,
+        deadline: deadline || '',
         amount: amount.trim(),
         reference: reference.trim(),
         contact_name: contactName.trim(),

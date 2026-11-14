@@ -1,12 +1,10 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strconv"
-	"time"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -23,6 +21,19 @@ type CrawlerHandler struct {
 	Links     *models.CrawlLinkStore
 	Runs      *models.CrawlRunStore
 	CrawlDeps crawler.Deps
+	// Trigger lanza en segundo plano la cadena completa (crawl → extracción →
+	// Grants.gov → estados) con los mismos candados del cron. Devuelve false
+	// si ya hay una corriendo.
+	Trigger func() bool
+}
+
+// levelOr valida el nivel; vacío → def.
+func levelOr(l, def string) (string, bool) {
+	l = strings.ToLower(strings.TrimSpace(l))
+	if l == "" {
+		return def, true
+	}
+	return l, models.ValidLevel(l)
 }
 
 // Stats returns aggregate crawler statistics.
@@ -168,11 +179,21 @@ func (h *CrawlerHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 		MaxDepth     int    `json:"max_depth"`
 		RecrawlHours int    `json:"recrawl_hours"`
 		Priority     int    `json:"priority"`
+		Level        string `json:"level"`
+		StartURL     string `json:"start_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+	level, ok := levelOr(req.Level, "estatal")
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "level must be federal, estatal, municipal or local"})
+		return
+	}
+	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
+	req.Domain = strings.TrimPrefix(strings.TrimPrefix(req.Domain, "https://"), "http://")
+	req.Domain = strings.TrimRight(req.Domain, "/")
 	if req.Domain == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "domain is required"})
 		return
@@ -197,6 +218,8 @@ func (h *CrawlerHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 		MaxDepth:     req.MaxDepth,
 		RecrawlHours: req.RecrawlHours,
 		Priority:     req.Priority,
+		Level:        level,
+		StartURL:     strings.TrimSpace(req.StartURL),
 	}
 	if err := h.Domains.Create(r.Context(), d); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create domain"})
@@ -219,9 +242,16 @@ func (h *CrawlerHandler) UpdateDomain(w http.ResponseWriter, r *http.Request) {
 		MaxDepth     int    `json:"max_depth"`
 		RecrawlHours int    `json:"recrawl_hours"`
 		Priority     int    `json:"priority"`
+		Level        string `json:"level"`
+		StartURL     string `json:"start_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	level, ok := levelOr(req.Level, "") // vacío: se conserva el que tenía
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "level must be federal, estatal, municipal or local"})
 		return
 	}
 
@@ -232,6 +262,8 @@ func (h *CrawlerHandler) UpdateDomain(w http.ResponseWriter, r *http.Request) {
 		MaxDepth:     req.MaxDepth,
 		RecrawlHours: req.RecrawlHours,
 		Priority:     req.Priority,
+		Level:        level,
+		StartURL:     strings.TrimSpace(req.StartURL),
 	}
 	if err := h.Domains.Update(r.Context(), d); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "domain not found"})
@@ -278,14 +310,16 @@ func (h *CrawlerHandler) DeleteDomain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// TriggerCrawl manually triggers a crawl run in a background goroutine.
+// TriggerCrawl lanza en segundo plano la cadena de fondos (crawl →
+// extracción → Grants.gov → estados).
 func (h *CrawlerHandler) TriggerCrawl(w http.ResponseWriter, r *http.Request) {
-	go func() {
-		slog.Info("crawler: manual trigger started")
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-		defer cancel()
-		crawler.RunCrawl(ctx, h.CrawlDeps, 100)
-		slog.Info("crawler: manual trigger finished")
-	}()
+	if h.Trigger == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "crawler not available"})
+		return
+	}
+	if !h.Trigger() {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "running", "message": "Ya hay una búsqueda en curso"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "triggered", "message": "Crawl started in background"})
 }

@@ -151,3 +151,23 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"created_at": user.CreatedAt,
 	})
 }
+
+// Shutdown atiende POST /api/shutdown: responde 202 y luego apaga Folio de
+// forma ordenada (lo mismo que SIGTERM).
+func Shutdown(stop func()) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if stop == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "shutdown not available"})
+			return
+		}
+		slog.Info("shutdown: requested from the app")
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "shutting down"})
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		go func() {
+			time.Sleep(300 * time.Millisecond) // que la respuesta salga primero
+			stop()
+		}()
+	}
+}

@@ -19,6 +19,8 @@ type CrawlDomain struct {
 	RecrawlHours  int        `json:"recrawl_hours"`
 	Priority      int        `json:"priority"`
 	Active        bool       `json:"active"`
+	Level         string     `json:"level"`
+	StartURL      string     `json:"start_url"`
 	PageCount     int        `json:"page_count"`
 	LastCrawledAt *time.Time `json:"last_crawled_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -35,7 +37,7 @@ func NewCrawlDomainStore(pool *pgxpool.Pool) *CrawlDomainStore {
 func (s *CrawlDomainStore) List(ctx context.Context) ([]CrawlDomain, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, domain, label, category, max_depth, recrawl_hours, priority,
-		       active, page_count, last_crawled_at, created_at
+		       active, level, start_url, page_count, last_crawled_at, created_at
 		FROM crawl_domains
 		ORDER BY priority DESC, domain
 	`)
@@ -49,7 +51,7 @@ func (s *CrawlDomainStore) List(ctx context.Context) ([]CrawlDomain, error) {
 		var d CrawlDomain
 		if err := rows.Scan(
 			&d.ID, &d.Domain, &d.Label, &d.Category, &d.MaxDepth, &d.RecrawlHours,
-			&d.Priority, &d.Active, &d.PageCount, &d.LastCrawledAt, &d.CreatedAt,
+			&d.Priority, &d.Active, &d.Level, &d.StartURL, &d.PageCount, &d.LastCrawledAt, &d.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("crawl domain scan: %w", err)
 		}
@@ -61,7 +63,7 @@ func (s *CrawlDomainStore) List(ctx context.Context) ([]CrawlDomain, error) {
 func (s *CrawlDomainStore) ListActive(ctx context.Context) ([]CrawlDomain, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, domain, label, category, max_depth, recrawl_hours, priority,
-		       active, page_count, last_crawled_at, created_at
+		       active, level, start_url, page_count, last_crawled_at, created_at
 		FROM crawl_domains
 		WHERE active = true
 		ORDER BY priority DESC, domain
@@ -76,7 +78,7 @@ func (s *CrawlDomainStore) ListActive(ctx context.Context) ([]CrawlDomain, error
 		var d CrawlDomain
 		if err := rows.Scan(
 			&d.ID, &d.Domain, &d.Label, &d.Category, &d.MaxDepth, &d.RecrawlHours,
-			&d.Priority, &d.Active, &d.PageCount, &d.LastCrawledAt, &d.CreatedAt,
+			&d.Priority, &d.Active, &d.Level, &d.StartURL, &d.PageCount, &d.LastCrawledAt, &d.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("crawl domain scan: %w", err)
 		}
@@ -89,11 +91,11 @@ func (s *CrawlDomainStore) GetByID(ctx context.Context, id uuid.UUID) (*CrawlDom
 	var d CrawlDomain
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, domain, label, category, max_depth, recrawl_hours, priority,
-		       active, page_count, last_crawled_at, created_at
+		       active, level, start_url, page_count, last_crawled_at, created_at
 		FROM crawl_domains WHERE id = $1
 	`, id).Scan(
 		&d.ID, &d.Domain, &d.Label, &d.Category, &d.MaxDepth, &d.RecrawlHours,
-		&d.Priority, &d.Active, &d.PageCount, &d.LastCrawledAt, &d.CreatedAt,
+		&d.Priority, &d.Active, &d.Level, &d.StartURL, &d.PageCount, &d.LastCrawledAt, &d.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("crawl domain get: %w", err)
@@ -106,10 +108,10 @@ func (s *CrawlDomainStore) Create(ctx context.Context, d *CrawlDomain) error {
 		d.ID = uuid.New()
 	}
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO crawl_domains (id, domain, label, category, max_depth, recrawl_hours, priority)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO crawl_domains (id, domain, label, category, max_depth, recrawl_hours, priority, level, start_url)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING active, page_count, last_crawled_at, created_at
-	`, d.ID, d.Domain, d.Label, d.Category, d.MaxDepth, d.RecrawlHours, d.Priority).Scan(
+	`, d.ID, d.Domain, d.Label, d.Category, d.MaxDepth, d.RecrawlHours, d.Priority, d.Level, d.StartURL).Scan(
 		&d.Active, &d.PageCount, &d.LastCrawledAt, &d.CreatedAt,
 	)
 	if err != nil {
@@ -121,9 +123,10 @@ func (s *CrawlDomainStore) Create(ctx context.Context, d *CrawlDomain) error {
 func (s *CrawlDomainStore) Update(ctx context.Context, d *CrawlDomain) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE crawl_domains
-		SET label = $2, category = $3, max_depth = $4, recrawl_hours = $5, priority = $6
+		SET label = $2, category = $3, max_depth = $4, recrawl_hours = $5, priority = $6,
+		    level = COALESCE(NULLIF($7, ''), level), start_url = COALESCE(NULLIF($8, ''), start_url)
 		WHERE id = $1
-	`, d.ID, d.Label, d.Category, d.MaxDepth, d.RecrawlHours, d.Priority)
+	`, d.ID, d.Label, d.Category, d.MaxDepth, d.RecrawlHours, d.Priority, d.Level, d.StartURL)
 	if err != nil {
 		return fmt.Errorf("crawl domain update: %w", err)
 	}
@@ -167,4 +170,12 @@ func (s *CrawlDomainStore) IncrementPageCount(ctx context.Context, id uuid.UUID)
 		return fmt.Errorf("crawl domain increment page count: %w", err)
 	}
 	return nil
+}
+
+// EntryURL es la URL de arranque del dominio: start_url o la portada.
+func (d *CrawlDomain) EntryURL() string {
+	if d.StartURL != "" {
+		return d.StartURL
+	}
+	return "https://" + d.Domain + "/"
 }

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Saul-Punybz/folio/internal/config"
+	"github.com/Saul-Punybz/folio/internal/embeddb"
 	"github.com/Saul-Punybz/folio/internal/handlers"
 	"github.com/Saul-Punybz/folio/internal/models"
 )
@@ -58,7 +61,12 @@ func userCommand(args []string) error {
 			return fmt.Errorf("hash: %w", err)
 		}
 
-		pool, err := connect(ctx, config.Load().DB)
+		cfg, cleanup, err := userDB()
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		pool, err := connect(ctx, cfg)
 		if err != nil {
 			return err
 		}
@@ -80,7 +88,12 @@ func userCommand(args []string) error {
 		return nil
 
 	case "list":
-		pool, err := connect(ctx, config.Load().DB)
+		cfg, cleanup, err := userDB()
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		pool, err := connect(ctx, cfg)
 		if err != nil {
 			return err
 		}
@@ -99,6 +112,69 @@ func userCommand(args []string) error {
 	default:
 		return errors.New(usage)
 	}
+}
+
+// userDB elige la base para `folio user`:
+//   - con alguna variable DB_* → esa base (servidor);
+//   - sin DB_* → el Postgres embebido de la app: si Folio está abierto, su
+//     conexión (puerto de pgdata/postmaster.pid y contraseña de db.secret);
+//     si no, lo arranca un momento y lo para al terminar.
+func userDB() (config.DBConfig, func(), error) {
+	noop := func() {}
+	for _, k := range []string{"DB_HOST", "DB_PORT", "DB_USER", "DB_PASS", "DB_NAME", "DB_SSLMODE"} {
+		if os.Getenv(k) != "" {
+			return config.Load().DB, noop, nil
+		}
+	}
+	root, err := appRoot()
+	if err != nil {
+		return config.DBConfig{}, noop, err
+	}
+	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o700); err != nil {
+		return config.DBConfig{}, noop, err
+	}
+	lock, ok, err := lockInstance(root)
+	if err != nil {
+		return config.DBConfig{}, noop, fmt.Errorf("candado de instancia: %w", err)
+	}
+	if !ok {
+		// Folio está abierto: usar su Postgres.
+		cfg, err := runningDB(root)
+		return cfg, noop, err
+	}
+	pg, err := embeddb.Start(embeddb.Options{Root: root, BinariesPath: pgBinaries()})
+	if err != nil {
+		lock.Close()
+		return config.DBConfig{}, noop, fmt.Errorf("no arrancó la base de datos: %w", err)
+	}
+	return pg.DB(), func() {
+		if err := pg.Stop(); err != nil {
+			fmt.Fprintln(os.Stderr, "aviso: parar postgres:", err)
+		}
+		lock.Close()
+	}, nil
+}
+
+// runningDB: conexión al Postgres del Folio que está abierto.
+func runningDB(root string) (config.DBConfig, error) {
+	pid, err := os.ReadFile(filepath.Join(root, "pgdata", "postmaster.pid"))
+	if err != nil {
+		return config.DBConfig{}, fmt.Errorf("Folio está abierto pero su base no responde todavía: %w", err)
+	}
+	lines := strings.Split(string(pid), "\n")
+	if len(lines) < 4 {
+		return config.DBConfig{}, errors.New("postmaster.pid incompleto")
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(lines[3]))
+	if err != nil {
+		return config.DBConfig{}, fmt.Errorf("puerto en postmaster.pid: %w", err)
+	}
+	secret, err := os.ReadFile(filepath.Join(root, "db.secret"))
+	if err != nil {
+		return config.DBConfig{}, fmt.Errorf("db.secret: %w", err)
+	}
+	return config.DBConfig{Host: "127.0.0.1", Port: port, User: "folio", Pass: strings.TrimSpace(string(secret)),
+		DBName: "folio", SSLMode: "disable"}, nil
 }
 
 // readPassword lee FOLIO_PASSWORD; si no está, stdin (sin eco en terminal).
