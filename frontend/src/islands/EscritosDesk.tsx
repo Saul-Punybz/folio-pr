@@ -1,11 +1,49 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, type Escrito, type EscritoSource, type SEOScore } from '../lib/api';
 
+const FORMAT_OPTIONS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'article', label: 'Articulo' },
+  { value: 'newsletter', label: 'Newsletter' },
+  { value: 'report', label: 'Reporte' },
+  { value: 'memo', label: 'Memo' },
+  { value: 'letter', label: 'Carta' },
+  { value: 'email', label: 'Email' },
+  { value: 'op_ed', label: 'Opinion' },
+] as const;
+
+const STYLE_OPTIONS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'academic', label: 'Academico' },
+  { value: 'journalistic', label: 'Periodistico' },
+  { value: 'executive', label: 'Ejecutivo' },
+  { value: 'institutional', label: 'Institucional' },
+  { value: 'persuasive', label: 'Persuasivo' },
+  { value: 'newsletter', label: 'Newsletter' },
+] as const;
+
+const AUDIENCE_OPTIONS = [
+  { value: 'general', label: 'General' },
+  { value: 'academic', label: 'Academica' },
+  { value: 'executive', label: 'Ejecutiva' },
+  { value: 'public_sector', label: 'Sector publico' },
+  { value: 'community', label: 'Comunidad' },
+  { value: 'donor', label: 'Donantes' },
+] as const;
+
+const CITATION_OPTIONS = [
+  { value: 'apa', label: 'APA' },
+  { value: 'mla', label: 'MLA' },
+  { value: 'chicago', label: 'Chicago' },
+  { value: 'inline', label: 'Inline' },
+] as const;
+
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string; emoji: string; border: string }> = {
   queued:     { bg: 'bg-zinc-100 dark:bg-zinc-800',        text: 'text-zinc-600 dark:text-zinc-300',      label: 'En cola',      emoji: '\u23f3', border: 'border-zinc-300 dark:border-zinc-600' },
   planning:   { bg: 'bg-blue-100 dark:bg-blue-900/40',     text: 'text-blue-700 dark:text-blue-300',      label: 'Planificando', emoji: '\ud83d\udcdd', border: 'border-blue-300 dark:border-blue-700' },
   generating: { bg: 'bg-amber-100 dark:bg-amber-900/40',   text: 'text-amber-700 dark:text-amber-300',    label: 'Generando',    emoji: '\u2712\ufe0f', border: 'border-amber-300 dark:border-amber-700' },
   scoring:    { bg: 'bg-purple-100 dark:bg-purple-900/40',  text: 'text-purple-700 dark:text-purple-300',  label: 'Puntuando',    emoji: '\ud83d\udcca', border: 'border-purple-300 dark:border-purple-700' },
+  verifying:  { bg: 'bg-teal-100 dark:bg-teal-900/40',      text: 'text-teal-700 dark:text-teal-300',      label: 'Verificando',  emoji: '\ud83d\udd0e', border: 'border-teal-300 dark:border-teal-700' },
   improving:  { bg: 'bg-cyan-100 dark:bg-cyan-900/40',     text: 'text-cyan-700 dark:text-cyan-300',      label: 'Mejorando',    emoji: '\u2728', border: 'border-cyan-300 dark:border-cyan-700' },
   done:       { bg: 'bg-emerald-100 dark:bg-emerald-900/40',text: 'text-emerald-700 dark:text-emerald-300',label: 'Completado',   emoji: '\u2705', border: 'border-emerald-300 dark:border-emerald-700' },
   failed:     { bg: 'bg-red-100 dark:bg-red-900/40',       text: 'text-red-700 dark:text-red-300',        label: 'Error',        emoji: '\u274c', border: 'border-red-300 dark:border-red-700' },
@@ -19,13 +57,15 @@ const PUBLISH_STYLES: Record<string, { label: string; color: string }> = {
 
 const PHASE_MESSAGES: Record<string, string> = {
   queued:     'Preparando generacion...',
-  planning:   'Fase 1-2 de 4 — Recopilando fuentes y planificando estructura...',
-  generating: 'Fase 3 de 4 — Generando contenido seccion por seccion...',
-  scoring:    'Fase 4 de 4 — Calculando puntuacion SEO...',
+  planning:   'Fase 1-2 de 5 — Recopilando fuentes y planificando estructura...',
+  generating: 'Fase 3 de 5 — Generando contenido seccion por seccion...',
+  scoring:    'Fase 4 de 5 — Calculando puntuacion SEO...',
+  verifying:  'Fase 5 de 5 — Verificando citas, estructura y export markdown...',
   improving:  'Mejorando articulo con tus instrucciones...',
 };
 
-const ACTIVE_STATUSES = ['queued', 'planning', 'generating', 'scoring', 'improving'];
+const ACTIVE_STATUSES = ['queued', 'planning', 'generating', 'scoring', 'verifying', 'improving'];
+const TOTAL_GENERATION_PHASES = 5;
 
 type Tab = 'contenido' | 'seo' | 'fuentes' | 'exportar';
 
@@ -46,6 +86,11 @@ export default function EscritosDesk() {
   const [activeTab, setActiveTab] = useState<Tab>('contenido');
   const [showCreate, setShowCreate] = useState(false);
   const [newTopic, setNewTopic] = useState('');
+  const [showAdvancedCreate, setShowAdvancedCreate] = useState(false);
+  const [createFormat, setCreateFormat] = useState<Escrito['output_format']>('auto');
+  const [createStyle, setCreateStyle] = useState<Escrito['writing_style']>('auto');
+  const [createAudience, setCreateAudience] = useState<Escrito['target_audience']>('general');
+  const [createCitation, setCreateCitation] = useState<Escrito['citation_style']>('apa');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showImprove, setShowImprove] = useState(false);
@@ -91,7 +136,7 @@ export default function EscritosDesk() {
 
     const interval = setInterval(async () => {
       await loadEscritos();
-      if (selected && ['queued', 'planning', 'generating', 'scoring'].includes(selected.status)) {
+      if (selected && ['queued', 'planning', 'generating', 'scoring', 'verifying', 'improving'].includes(selected.status)) {
         loadDetail(selected.id);
       }
     }, 5000);
@@ -103,9 +148,19 @@ export default function EscritosDesk() {
     if (!newTopic.trim()) return;
     setCreating(true);
     try {
-      const escrito = await api.createEscrito(newTopic.trim());
+      const escrito = await api.createEscrito(newTopic.trim(), [], {
+        output_format: createFormat,
+        writing_style: createStyle,
+        target_audience: createAudience,
+        citation_style: createCitation,
+      });
       setNewTopic('');
       setShowCreate(false);
+      setShowAdvancedCreate(false);
+      setCreateFormat('auto');
+      setCreateStyle('auto');
+      setCreateAudience('general');
+      setCreateCitation('apa');
       await loadEscritos();
       selectEscrito(escrito);
     } catch (e) {
@@ -177,11 +232,11 @@ export default function EscritosDesk() {
             />
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => { setShowCreate(false); setNewTopic(''); }}
-                className="px-5 py-2.5 text-sm font-bold text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-              >
-                Cancelar
-              </button>
+              onClick={() => { setShowCreate(false); setNewTopic(''); }}
+              className="px-5 py-2.5 text-sm font-bold text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+            >
+              Cancelar
+            </button>
               <button
                 onClick={handleCreate}
                 disabled={creating || !newTopic.trim()}
@@ -189,6 +244,43 @@ export default function EscritosDesk() {
               >
                 {creating ? 'Generando...' : 'Generar Articulo'}
               </button>
+            </div>
+            <div className="mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedCreate((v) => !v)}
+                className="text-xs font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-400"
+              >
+                {showAdvancedCreate ? 'Ocultar opciones avanzadas' : 'Mostrar opciones avanzadas'}
+              </button>
+              {showAdvancedCreate && (
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <label className="block">
+                    <span className="block text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-1">Formato</span>
+                    <select value={createFormat} onChange={(e) => setCreateFormat(e.target.value as Escrito['output_format'])} className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg">
+                      {FORMAT_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-1">Estilo</span>
+                    <select value={createStyle} onChange={(e) => setCreateStyle(e.target.value as Escrito['writing_style'])} className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg">
+                      {STYLE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-1">Audiencia</span>
+                    <select value={createAudience} onChange={(e) => setCreateAudience(e.target.value as Escrito['target_audience'])} className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg">
+                      {AUDIENCE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-1">Citas</span>
+                    <select value={createCitation} onChange={(e) => setCreateCitation(e.target.value as Escrito['citation_style'])} className="w-full px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg">
+                      {CITATION_OPTIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  </label>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -251,6 +343,11 @@ export default function EscritosDesk() {
                       {e.word_count} palabras
                     </div>
                   )}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 uppercase">{e.output_format || 'article'}</span>
+                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 uppercase">{e.writing_style || 'journalistic'}</span>
+                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 uppercase">{e.citation_style || 'apa'}</span>
+                  </div>
                 </button>
               );
             })}
@@ -277,7 +374,7 @@ export default function EscritosDesk() {
                     <StatusBadge status={selected.status} />
                     <PublishBadge status={selected.publish_status} />
                     <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400">
-                      Fase {selected.phase}/4
+                      Fase {Math.min(selected.phase || 0, TOTAL_GENERATION_PHASES)}/{TOTAL_GENERATION_PHASES}
                     </span>
                     {selected.word_count > 0 && (
                       <span className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -287,13 +384,13 @@ export default function EscritosDesk() {
                   </div>
 
                   {/* Live progress */}
-                  {['queued', 'planning', 'generating', 'scoring'].includes(selected.status) && (
+                  {['queued', 'planning', 'generating', 'scoring', 'verifying'].includes(selected.status) && (
                     <div className="mt-4 p-4 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border-2 border-indigo-200 dark:border-indigo-800">
                       <div className="w-full h-2 bg-indigo-200 dark:bg-indigo-900 rounded-full overflow-hidden mb-3">
                         <div
                           className="h-full bg-indigo-500 rounded-full transition-all duration-1000"
                           style={{
-                            width: selected.status === 'queued' ? '5%' : `${Math.max((selected.phase / 4) * 100, 8)}%`,
+                            width: selected.status === 'queued' ? '5%' : `${Math.max((Math.min(selected.phase || 0, TOTAL_GENERATION_PHASES) / TOTAL_GENERATION_PHASES) * 100, 8)}%`,
                             animation: 'pulse 2s ease-in-out infinite',
                           }}
                         />
@@ -390,6 +487,16 @@ export default function EscritosDesk() {
                   onRecalc={async () => {
                     await api.recalcSEO(selected.id);
                     loadDetail(selected.id);
+                  }}
+                  onOptimize={async (instructions) => {
+                    await api.optimizeEscritoSEO(selected.id, instructions);
+                    loadDetail(selected.id);
+                    loadEscritos();
+                  }}
+                  onExpand={async (instructions) => {
+                    await api.expandEscrito(selected.id, instructions);
+                    loadDetail(selected.id);
+                    loadEscritos();
                   }}
                 />
               )}
@@ -496,7 +603,7 @@ function ContentTab({
     setContent(escrito.content);
   }, [escrito.id, escrito.title, escrito.meta_description, escrito.content]);
 
-  if (escrito.status !== 'done' && escrito.status !== 'failed') {
+  if (!escrito.content && escrito.status !== 'done' && escrito.status !== 'failed') {
     return (
       <div className="py-12 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
         <div className="flex justify-center mb-4">
@@ -528,6 +635,17 @@ function ContentTab({
 
   return (
     <div>
+      {escrito.status === 'improving' && (
+        <div className="mb-4 p-4 rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border-2 border-cyan-200 dark:border-cyan-800">
+          <div className="flex items-center gap-2.5">
+            <div className="animate-spin w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full shrink-0" />
+            <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300">
+              Optimizando el articulo. Puedes seguir leyendo la version actual mientras llega la nueva.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-2">
@@ -646,8 +764,21 @@ function ContentTab({
 
 // ── SEO Tab ──────────────────────────────────────────────────────
 
-function SEOTab({ escrito, onRecalc }: { escrito: Escrito; onRecalc: () => Promise<void> }) {
+function SEOTab({
+  escrito,
+  onRecalc,
+  onOptimize,
+  onExpand,
+}: {
+  escrito: Escrito;
+  onRecalc: () => Promise<void>;
+  onOptimize: (instructions: string) => Promise<void>;
+  onExpand: (instructions: string) => Promise<void>;
+}) {
   const [recalculating, setRecalculating] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const [expanding, setExpanding] = useState(false);
+  const [instructions, setInstructions] = useState('');
   const score = escrito.seo_score;
 
   const handleRecalc = async () => {
@@ -658,6 +789,37 @@ function SEOTab({ escrito, onRecalc }: { escrito: Escrito; onRecalc: () => Promi
       setRecalculating(false);
     }
   };
+
+  const handleOptimize = async (preset?: string) => {
+    const finalInstructions = (preset || instructions).trim();
+    setOptimizing(true);
+    try {
+      await onOptimize(finalInstructions);
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  const handleExpand = async (preset?: string) => {
+    const finalInstructions = (preset || instructions).trim();
+    setExpanding(true);
+    try {
+      await onExpand(finalInstructions);
+    } finally {
+      setExpanding(false);
+    }
+  };
+
+  const quickPresets = [
+    'Mejora la claridad, reduce repeticiones y fortalece las transiciones entre secciones.',
+    'Refuerza la introduccion, conclusion y los H2 para hacer el articulo mas escaneable.',
+    'Aumenta naturalmente la presencia de la keyword principal sin sonar artificial.',
+  ];
+  const expansionPresets = [
+    'Hazlo mas largo y profundo con mas contexto y antecedentes.',
+    'Agrega subsecciones nuevas con implicaciones, riesgos y escenarios.',
+    'Expande la FAQ y fortalece la conclusion con recomendaciones claras.',
+  ];
 
   if (!score || !score.total) {
     return (
@@ -693,6 +855,17 @@ function SEOTab({ escrito, onRecalc }: { escrito: Escrito; onRecalc: () => Promi
 
   return (
     <div>
+      {(escrito.status === 'improving' || optimizing || expanding) && (
+        <div className="mb-6 p-4 rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border-2 border-cyan-200 dark:border-cyan-800">
+          <div className="flex items-center gap-2.5">
+            <div className="animate-spin w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full shrink-0" />
+            <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300">
+              Mejorando redaccion, profundidad y metadata SEO...
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Overall score */}
       <div className="flex items-center gap-8 mb-8 p-6 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
         <div className="text-center">
@@ -714,8 +887,66 @@ function SEOTab({ escrito, onRecalc }: { escrito: Escrito; onRecalc: () => Promi
           disabled={recalculating}
           className="px-4 py-2 text-sm font-bold text-indigo-600 dark:text-indigo-400 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/20 disabled:opacity-50 transition-colors shrink-0"
         >
-          {recalculating ? '...' : 'Recalcular'}
+          {recalculating ? '...' : 'Recalcular Puntaje'}
         </button>
+      </div>
+
+      <div className="mb-8 p-5 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-sm font-black text-zinc-800 dark:text-zinc-100 uppercase tracking-wide">Optimizar Escritura SEO</h3>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+              Esto no solo recalcula la nota. Reescribe el articulo para mejorar claridad, estructura, keywording y metadata.
+            </p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => handleExpand()}
+              disabled={expanding || optimizing || escrito.status !== 'done'}
+              className="px-4 py-2.5 text-sm font-bold text-cyan-700 dark:text-cyan-300 border-2 border-cyan-300 dark:border-cyan-700 rounded-lg hover:bg-cyan-50 dark:hover:bg-cyan-950/20 disabled:opacity-50 transition-colors"
+            >
+              {expanding ? 'Expandiendo...' : 'Expandir Articulo'}
+            </button>
+            <button
+              onClick={() => handleOptimize()}
+              disabled={optimizing || expanding || escrito.status !== 'done'}
+              className="px-4 py-2.5 text-sm font-bold bg-cyan-600 text-white rounded-lg hover:bg-cyan-700 disabled:opacity-50 transition-colors"
+            >
+              {optimizing ? 'Optimizando...' : 'Optimizar SEO'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-4">
+          {quickPresets.map((preset) => (
+            <button
+              key={preset}
+              onClick={() => handleOptimize(preset)}
+              disabled={optimizing || expanding || escrito.status !== 'done'}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-cyan-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors disabled:opacity-50"
+            >
+              {preset.includes('claridad') ? 'Claridad' : preset.includes('introduccion') ? 'Estructura' : 'Keyword'}
+            </button>
+          ))}
+          {expansionPresets.map((preset) => (
+            <button
+              key={preset}
+              onClick={() => handleExpand(preset)}
+              disabled={optimizing || expanding || escrito.status !== 'done'}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors disabled:opacity-50"
+            >
+              {preset.includes('largo') ? 'Mas Largo' : preset.includes('subsecciones') ? 'Mas Secciones' : 'FAQ + Cierre'}
+            </button>
+          ))}
+        </div>
+
+        <textarea
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+          rows={4}
+          placeholder="Ej: mejora la introduccion, sube la densidad de la keyword principal, haz los H2 mas claros, fortalece la conclusion..."
+          className="w-full px-4 py-3 text-sm bg-zinc-50 dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-600 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none placeholder:text-zinc-400"
+        />
       </div>
 
       {/* Component breakdown */}
@@ -773,51 +1004,86 @@ function SourcesTab({ sources }: { sources: EscritoSource[] }) {
       <div className="py-12 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
         <div className="text-4xl mb-3">&#128196;</div>
         <p className="text-base font-bold text-zinc-500 dark:text-zinc-400">Sin fuentes</p>
-        <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Las fuentes se agregan durante la Fase 1</p>
+        <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Las fuentes se agregan durante la generacion</p>
       </div>
     );
   }
 
+  const webCount = sources.filter(s => !s.article_id).length;
+  const localCount = sources.length - webCount;
+
   return (
     <div>
-      <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide mb-4">
-        {sources.length} fuentes utilizadas
-      </p>
+      <div className="flex items-center gap-3 mb-4">
+        <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
+          {sources.length} fuentes utilizadas
+        </p>
+        {webCount > 0 && (
+          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+            {webCount} web
+          </span>
+        )}
+        {localCount > 0 && (
+          <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400">
+            {localCount} local
+          </span>
+        )}
+      </div>
       <div className="space-y-3">
-        {sources.map((s) => (
-          <div key={s.id} className="p-4 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl hover:shadow-md transition-all">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 leading-snug">
-                  {s.article_title}
-                </h3>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.article_source}</span>
-                  {s.relevance > 0 && (
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
-                      s.relevance >= 0.7 ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' :
-                      s.relevance >= 0.4 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' :
-                      'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
-                    }`}>
-                      {Math.round(s.relevance * 100)}% relevancia
-                    </span>
-                  )}
-                  {s.used_in_section && (
-                    <span className="text-[11px] text-zinc-400">usado en: {s.used_in_section}</span>
+        {sources.map((s) => {
+          const isWeb = !s.article_id;
+          const displayTitle = s.article_title || s.web_title || 'Sin titulo';
+          const displaySource = s.article_source || s.web_domain || '';
+          const displayURL = s.article_url || s.web_url || '';
+          return (
+            <div key={s.id} className="p-4 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl hover:shadow-md transition-all">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    {isWeb && (
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 uppercase tracking-wider shrink-0">
+                        WEB
+                      </span>
+                    )}
+                    <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 leading-snug truncate">
+                      {displayTitle}
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{displaySource}</span>
+                    {s.relevance > 0 && (
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                        s.relevance >= 0.7 ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' :
+                        s.relevance >= 0.4 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' :
+                        'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
+                      }`}>
+                        {Math.round(s.relevance * 100)}% relevancia
+                      </span>
+                    )}
+                    {s.used_in_section && (
+                      <span className="text-[11px] text-zinc-400">usado en: {s.used_in_section}</span>
+                    )}
+                  </div>
+                  {displayURL && (
+                    <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1 truncate">
+                      {displayURL}
+                    </div>
                   )}
                 </div>
+                {displayURL && (
+                  <a
+                    href={displayURL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                  >
+                    Abrir &#8594;
+                  </a>
+                )}
               </div>
-              <a
-                href={s.article_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
-              >
-                Abrir &#8594;
-              </a>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -827,29 +1093,54 @@ function SourcesTab({ sources }: { sources: EscritoSource[] }) {
 
 function ExportTab({ escrito }: { escrito: Escrito }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [previewFormat, setPreviewFormat] = useState<'markdown' | 'html'>('markdown');
   const [preview, setPreview] = useState('');
   const [loadingPreview, setLoadingPreview] = useState(false);
 
-  const handleExport = async (format: 'markdown' | 'html') => {
+  const handleCopy = async (format: 'markdown' | 'html') => {
+    setError(null);
     try {
       const result = await api.exportEscrito(escrito.id, format);
       await navigator.clipboard.writeText(result.content);
       setCopied(format);
-      setTimeout(() => setCopied(null), 2000);
+      setTimeout(() => setCopied(null), 2500);
     } catch (e) {
-      console.error('export:', e);
+      setError(`Error al copiar ${format}: ${e}`);
+    }
+  };
+
+  const handleDownload = async (format: 'markdown' | 'html') => {
+    setError(null);
+    try {
+      const result = await api.exportEscrito(escrito.id, format);
+      const ext = format === 'html' ? 'html' : 'md';
+      const mime = format === 'html' ? 'text/html' : 'text/markdown';
+      const blob = new Blob([result.content], { type: `${mime};charset=utf-8` });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${escrito.slug || 'escrito'}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setCopied('download-' + format);
+      setTimeout(() => setCopied(null), 2500);
+    } catch (e) {
+      setError(`Error al descargar: ${e}`);
     }
   };
 
   const handlePreview = async (format: 'markdown' | 'html') => {
     setPreviewFormat(format);
     setLoadingPreview(true);
+    setError(null);
     try {
       const result = await api.exportEscrito(escrito.id, format);
       setPreview(result.content);
     } catch (e) {
-      console.error('preview:', e);
+      setError(`Error al generar preview: ${e}`);
     } finally {
       setLoadingPreview(false);
     }
@@ -866,28 +1157,58 @@ function ExportTab({ escrito }: { escrito: Escrito }) {
 
   return (
     <div>
-      {/* Export buttons */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 dark:bg-red-950/30 border-2 border-red-300 dark:border-red-800 rounded-xl text-sm font-medium text-red-700 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
+      {/* Copy to clipboard */}
+      <h3 className="text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3">Copiar al portapapeles</h3>
       <div className="flex gap-4 mb-6">
         <button
-          onClick={() => handleExport('markdown')}
+          onClick={() => handleCopy('markdown')}
           className="flex-1 p-4 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md transition-all text-center"
         >
           <div className="text-2xl mb-2">&#128221;</div>
           <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Copiar Markdown</div>
           <div className="text-xs text-zinc-500 mt-1">Para blogs, CMS, GitHub</div>
           {copied === 'markdown' && (
-            <div className="text-xs font-bold text-emerald-500 mt-2">&#10003; Copiado!</div>
+            <div className="text-xs font-bold text-emerald-500 mt-2 animate-fade-in">Copiado!</div>
           )}
         </button>
         <button
-          onClick={() => handleExport('html')}
+          onClick={() => handleCopy('html')}
           className="flex-1 p-4 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md transition-all text-center"
         >
           <div className="text-2xl mb-2">&#127760;</div>
           <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Copiar HTML</div>
           <div className="text-xs text-zinc-500 mt-1">Para web, email, newsletters</div>
           {copied === 'html' && (
-            <div className="text-xs font-bold text-emerald-500 mt-2">&#10003; Copiado!</div>
+            <div className="text-xs font-bold text-emerald-500 mt-2 animate-fade-in">Copiado!</div>
+          )}
+        </button>
+      </div>
+
+      {/* Download as file */}
+      <h3 className="text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3">Descargar archivo</h3>
+      <div className="flex gap-4 mb-6">
+        <button
+          onClick={() => handleDownload('markdown')}
+          className="flex-1 p-3 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-md transition-all text-center"
+        >
+          <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Descargar .md</div>
+          {copied === 'download-markdown' && (
+            <div className="text-xs font-bold text-emerald-500 mt-1 animate-fade-in">Descargado!</div>
+          )}
+        </button>
+        <button
+          onClick={() => handleDownload('html')}
+          className="flex-1 p-3 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-md transition-all text-center"
+        >
+          <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Descargar .html</div>
+          {copied === 'download-html' && (
+            <div className="text-xs font-bold text-emerald-500 mt-1 animate-fade-in">Descargado!</div>
           )}
         </button>
       </div>
@@ -907,16 +1228,17 @@ function ExportTab({ escrito }: { escrito: Escrito }) {
             onClick={async () => {
               await navigator.clipboard.writeText(escrito.hashtags.join(' '));
               setCopied('hashtags');
-              setTimeout(() => setCopied(null), 2000);
+              setTimeout(() => setCopied(null), 2500);
             }}
             className="text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
           >
-            {copied === 'hashtags' ? '&#10003; Copiado!' : 'Copiar hashtags'}
+            {copied === 'hashtags' ? 'Copiado!' : 'Copiar hashtags'}
           </button>
         </div>
       )}
 
       {/* Preview toggle */}
+      <h3 className="text-xs font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3">Preview</h3>
       <div className="mb-4 flex gap-2">
         <button
           onClick={() => handlePreview('markdown')}
@@ -926,7 +1248,7 @@ function ExportTab({ escrito }: { escrito: Escrito }) {
               : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
           }`}
         >
-          Preview Markdown
+          Markdown
         </button>
         <button
           onClick={() => handlePreview('html')}
@@ -936,7 +1258,7 @@ function ExportTab({ escrito }: { escrito: Escrito }) {
               : 'bg-white dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
           }`}
         >
-          Preview HTML
+          HTML
         </button>
       </div>
 

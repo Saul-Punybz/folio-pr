@@ -98,7 +98,7 @@ func (b *Bot) handleInbox(ctx context.Context, bot *tgbot.Bot, update *tgmodels.
 		return
 	}
 
-	articles, err := b.articles.ListByStatus(ctx, "inbox", 5, 0)
+	articles, err := b.articles.ListByStatus(ctx, "inbox", 5, 0, nil, nil)
 	if err != nil {
 		slog.Error("telegram: inbox", "err", err)
 		bot.SendMessage(ctx, &tgbot.SendMessageParams{
@@ -155,7 +155,7 @@ func (b *Bot) handleSaved(ctx context.Context, bot *tgbot.Bot, update *tgmodels.
 		return
 	}
 
-	articles, err := b.articles.ListByStatus(ctx, "saved", 5, 0)
+	articles, err := b.articles.ListByStatus(ctx, "saved", 5, 0, nil, nil)
 	if err != nil {
 		slog.Error("telegram: saved", "err", err)
 		bot.SendMessage(ctx, &tgbot.SendMessageParams{

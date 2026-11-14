@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS escritos (
     article_plan    JSONB NOT NULL DEFAULT '[]',
     seo_score       JSONB NOT NULL DEFAULT '{}',
     status          TEXT NOT NULL DEFAULT 'queued'
-                    CHECK (status IN ('queued','planning','generating','scoring','done','failed')),
+                    CHECK (status IN ('queued','planning','generating','scoring','done','failed','improving')),
     phase           INT NOT NULL DEFAULT 0,
     progress        JSONB NOT NULL DEFAULT '{}',
     publish_status  TEXT NOT NULL DEFAULT 'draft'

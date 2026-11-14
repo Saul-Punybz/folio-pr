@@ -255,6 +255,41 @@ export interface CrawlerStatsResponse {
   latest_run: CrawlRun | null;
 }
 
+// ── Opportunities (Grant/RFP Tracker) ───────────────────────────
+
+export interface Opportunity {
+  id: string;
+  page_id: string | null;
+  domain_id: string;
+  title: string;
+  agency: string;
+  summary: string;
+  amount: string;
+  amount_cents: number;
+  deadline: string | null;
+  contact_name: string;
+  contact_email: string;
+  category: 'rfp' | 'grant' | 'funding' | 'proposal' | 'contract' | 'fellowship' | 'scholarship' | 'other';
+  status: 'open' | 'closing_soon' | 'closed' | 'unknown';
+  source_url: string;
+  confidence: number;
+  raw_extraction: Record<string, any>;
+  reviewed: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OpportunitiesResponse {
+  opportunities: Opportunity[];
+  count: number;
+  total: number;
+}
+
+export interface OpportunityStatsResponse {
+  total: number;
+  by_status: Record<string, number>;
+}
+
 export interface SEOScore {
   total: number;
   keyword_density: SEOComponentScore;
@@ -277,6 +312,10 @@ export interface Escrito {
   id: string;
   user_id: string;
   topic: string;
+  output_format: 'auto' | 'article' | 'newsletter' | 'report' | 'memo' | 'letter' | 'email' | 'op_ed';
+  writing_style: 'auto' | 'academic' | 'journalistic' | 'executive' | 'institutional' | 'persuasive' | 'newsletter';
+  target_audience: 'general' | 'academic' | 'executive' | 'public_sector' | 'community' | 'donor';
+  citation_style: 'apa' | 'mla' | 'chicago' | 'inline';
   slug: string;
   title: string;
   meta_description: string;
@@ -285,7 +324,7 @@ export interface Escrito {
   content: string;
   article_plan: ArticleSection[];
   seo_score: SEOScore;
-  status: 'queued' | 'planning' | 'generating' | 'scoring' | 'done' | 'failed';
+  status: 'queued' | 'planning' | 'generating' | 'scoring' | 'verifying' | 'done' | 'failed';
   phase: number;
   progress: Record<string, any>;
   publish_status: 'draft' | 'reviewing' | 'published';
@@ -299,9 +338,12 @@ export interface Escrito {
 export interface EscritoSource {
   id: string;
   escrito_id: string;
-  article_id: string;
+  article_id: string | null;
   relevance: number;
   used_in_section: string;
+  web_url: string;
+  web_title: string;
+  web_domain: string;
   article_title: string;
   article_source: string;
   article_url: string;
@@ -327,10 +369,6 @@ async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T
     ...options,
   });
 
-  if (res.status === 401) {
-    throw new Error('Unauthorized');
-  }
-
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
@@ -346,8 +384,8 @@ async function fetchAPI<T = any>(path: string, options?: RequestInit): Promise<T
 
 export const api = {
   // Items
-  getItems: (status: string, limit = 200, offset = 0): Promise<ItemsResponse> =>
-    fetchAPI(`/items?status=${status}&limit=${limit}&offset=${offset}`),
+  getItems: (status: string, limit = 200, offset = 0, date = ''): Promise<ItemsResponse> =>
+    fetchAPI(`/items?status=${status}&limit=${limit}&offset=${offset}${date ? `&date=${date}` : ''}`),
 
   saveItem: (id: string) =>
     fetchAPI(`/items/${id}/save`, { method: 'POST' }),
@@ -394,9 +432,6 @@ export const api = {
     fetchAPI('/sources/quick', { method: 'POST', body: JSON.stringify({ url, region: region || undefined }) }),
 
   // Auth
-  login: (email: string, password: string) =>
-    fetchAPI('/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-
   // Notes
   getNotes: (articleId: string): Promise<NotesResponse> =>
     fetchAPI(`/items/${articleId}/notes`),
@@ -557,8 +592,27 @@ export const api = {
     fetchAPI(`/research/${id}`, { method: 'DELETE' }),
 
   // Escritos (SEO Article Generator)
-  createEscrito: (topic: string, articleIds?: string[]): Promise<Escrito> =>
-    fetchAPI('/escritos', { method: 'POST', body: JSON.stringify({ topic, article_ids: articleIds || [] }) }),
+  createEscrito: (
+    topic: string,
+    articleIds?: string[],
+    options?: Partial<{
+      output_format: Escrito['output_format'];
+      writing_style: Escrito['writing_style'];
+      target_audience: Escrito['target_audience'];
+      citation_style: Escrito['citation_style'];
+    }>
+  ): Promise<Escrito> =>
+    fetchAPI('/escritos', {
+      method: 'POST',
+      body: JSON.stringify({
+        topic,
+        article_ids: articleIds || [],
+        output_format: options?.output_format || 'auto',
+        writing_style: options?.writing_style || 'auto',
+        target_audience: options?.target_audience || 'general',
+        citation_style: options?.citation_style || 'apa',
+      }),
+    }),
 
   getEscritos: (): Promise<EscritosResponse> =>
     fetchAPI('/escritos'),
@@ -573,6 +627,10 @@ export const api = {
     keywords: string[];
     hashtags: string[];
     publish_status: string;
+    output_format: Escrito['output_format'];
+    writing_style: Escrito['writing_style'];
+    target_audience: Escrito['target_audience'];
+    citation_style: Escrito['citation_style'];
   }>): Promise<Escrito> =>
     fetchAPI(`/escritos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
@@ -584,6 +642,12 @@ export const api = {
 
   recalcSEO: (id: string): Promise<SEOScore> =>
     fetchAPI(`/escritos/${id}/seo-score`, { method: 'POST' }),
+
+  optimizeEscritoSEO: (id: string, instructions = ''): Promise<{ status: string; message: string }> =>
+    fetchAPI(`/escritos/${id}/seo-optimize`, { method: 'POST', body: JSON.stringify({ instructions }) }),
+
+  expandEscrito: (id: string, instructions = ''): Promise<{ status: string; message: string }> =>
+    fetchAPI(`/escritos/${id}/expand`, { method: 'POST', body: JSON.stringify({ instructions }) }),
 
   deleteEscrito: (id: string): Promise<{ status: string }> =>
     fetchAPI(`/escritos/${id}`, { method: 'DELETE' }),
@@ -641,4 +705,40 @@ export const api = {
 
   triggerCrawl: (): Promise<{ status: string; message: string }> =>
     fetchAPI('/crawler/trigger', { method: 'POST' }),
+
+  // Opportunities (Grant/RFP Tracker)
+  getOpportunities: (params?: { status?: string; category?: string; domain_id?: string; sort?: string; limit?: number; offset?: number }): Promise<OpportunitiesResponse> => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.category) qs.set('category', params.category);
+    if (params?.domain_id) qs.set('domain_id', params.domain_id);
+    if (params?.sort) qs.set('sort', params.sort);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    return fetchAPI(`/opportunities?${qs}`);
+  },
+
+  getOpportunityStats: (): Promise<OpportunityStatsResponse> =>
+    fetchAPI('/opportunities/stats'),
+
+  searchOpportunities: (q: string, limit = 50): Promise<{ opportunities: Opportunity[]; count: number }> =>
+    fetchAPI(`/opportunities/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+
+  getOpportunity: (id: string): Promise<Opportunity> =>
+    fetchAPI(`/opportunities/${id}`),
+
+  updateOpportunity: (id: string, data: Partial<Opportunity>): Promise<{ status: string }> =>
+    fetchAPI(`/opportunities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  deleteOpportunity: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/opportunities/${id}`, { method: 'DELETE' }),
+
+  reviewOpportunity: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/opportunities/${id}/review`, { method: 'POST' }),
+
+  refreshOpportunityStatuses: (): Promise<{ status: string; updated: number }> =>
+    fetchAPI('/opportunities/refresh-statuses', { method: 'POST' }),
+
+  triggerOpportunityExtraction: (): Promise<{ status: string; message: string }> =>
+    fetchAPI('/opportunities/extract', { method: 'POST' }),
 };

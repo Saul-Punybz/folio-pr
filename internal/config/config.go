@@ -66,7 +66,7 @@ type OllamaConfig struct {
 //
 // Provider "ollama" (default): Uses Ollama at AI_HOST with any model.
 //
-//	Models: llama3.2:3b, mistral, gemma2, qwen2.5, phi4, deepseek-r1:8b, etc.
+//	Models: qwen2.5:7b (default), mistral, gemma2, phi4, deepseek-r1:8b, etc.
 //
 // Provider "openai": Uses OpenAI-compatible API. Works with:
 //

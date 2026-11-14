@@ -165,7 +165,7 @@ RULES:
 func (c *OllamaClient) Classify(ctx context.Context, text string) ([]string, error) {
 	systemPrompt := `You are a strict tag classifier. You receive article text and output ONLY comma-separated tags.
 
-ALLOWED TAGS: politics, economy, health, education, infrastructure, environment, crime, grants, federal, legislation, government, technology, culture, sports
+ALLOWED TAGS: politics, economy, health, education, infrastructure, environment, crime, grants, federal, legislation, government, technology, culture, sports, business, small-business, nonprofit, entrepreneurship, tourism, energy, agriculture, housing
 
 EXAMPLES:
 Article about governor signing a bill → politics, legislation
@@ -173,7 +173,13 @@ Article about hospital funding cuts → health, economy
 Article about federal grants for schools → grants, education, federal
 Article about road construction project → infrastructure
 Article about arrests in Bayamón → crime
-Article about tech startup in San Juan → technology, economy
+Article about tech startup in San Juan → technology, entrepreneurship
+Article about local bakery opening → small-business, economy
+Article about hotel development in Isla Verde → tourism, business
+Article about solar farm project → energy, infrastructure
+Article about Boys & Girls Club program → nonprofit, education
+Article about coffee farmers in Jayuya → agriculture, economy
+Article about affordable housing crisis → housing, government
 
 RULES:
 - Output ONLY tags from the list above, comma-separated
@@ -516,12 +522,76 @@ func (c *OllamaClient) generateOpenAI(ctx context.Context, model, systemPrompt, 
 	return text, nil
 }
 
+// ExtractedOpportunity holds structured data extracted from a page that may
+// contain a grant, RFP, or funding opportunity.
+type ExtractedOpportunity struct {
+	IsOpportunity bool   `json:"is_opportunity"`
+	Title         string `json:"title"`
+	Agency        string `json:"agency"`
+	Summary       string `json:"summary"`
+	Amount        string `json:"amount"`
+	Deadline      string `json:"deadline"`
+	ContactName   string `json:"contact_name"`
+	ContactEmail  string `json:"contact_email"`
+	Category      string `json:"category"`
+	Confidence    int    `json:"confidence"`
+}
+
+// ExtractOpportunity asks the LLM to determine if the text describes a grant,
+// RFP, or funding opportunity and extract structured fields if so.
+func (c *OllamaClient) ExtractOpportunity(ctx context.Context, text string) (*ExtractedOpportunity, error) {
+	systemPrompt := `You analyze government web pages to find grant opportunities, RFPs, funding announcements, and similar.
+
+Determine if this page describes a grant, RFP, funding opportunity, fellowship, scholarship, contract, or proposal solicitation.
+
+Return a JSON object with these fields:
+- "is_opportunity": true/false - is this page about a funding opportunity?
+- "title": the opportunity title/name
+- "agency": the government agency or organization offering it
+- "summary": 2-3 sentence description of the opportunity
+- "amount": funding amount as text (e.g. "$50,000", "$10,000-$25,000", "Up to $1M", "" if unknown)
+- "deadline": application deadline in YYYY-MM-DD format ("" if unknown)
+- "contact_name": contact person name ("" if unknown)
+- "contact_email": contact email address ("" if unknown)
+- "category": one of: rfp, grant, funding, proposal, contract, fellowship, scholarship, other
+- "confidence": 1-100 how confident you are this is a real opportunity
+
+RULES:
+- Output ONLY valid JSON, nothing else
+- If the page is NOT about a funding opportunity, set is_opportunity to false and leave other fields empty
+- Extract information in the SAME language as the source text
+- Be conservative: only mark as opportunity if there's clear evidence
+- For deadline, use YYYY-MM-DD format. If only month/year, use last day of month`
+
+	resp, err := c.generate(ctx, systemPrompt, text)
+	if err != nil {
+		return nil, err
+	}
+
+	var result ExtractedOpportunity
+	resp = strings.TrimSpace(resp)
+	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		// Try to extract JSON from response
+		if start := strings.Index(resp, "{"); start != -1 {
+			if end := strings.LastIndex(resp, "}"); end > start {
+				if err2 := json.Unmarshal([]byte(resp[start:end+1]), &result); err2 == nil {
+					return &result, nil
+				}
+			}
+		}
+		return &ExtractedOpportunity{}, nil
+	}
+	return &result, nil
+}
+
 // allowedTags is the set of valid topic tags for classification.
 var allowedTags = map[string]bool{
 	"politics": true, "economy": true, "health": true, "education": true,
 	"infrastructure": true, "environment": true, "crime": true, "grants": true,
 	"federal": true, "legislation": true, "government": true, "technology": true,
-	"culture": true, "sports": true,
+	"culture": true, "sports": true, "business": true, "small-business": true,
+	"nonprofit": true, "entrepreneurship": true, "tourism": true, "energy": true,
+	"agriculture": true, "housing": true,
 }
 
 // garbagePatterns are substrings that indicate the AI returned commentary instead

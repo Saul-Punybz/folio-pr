@@ -97,7 +97,7 @@ func (s *EntityRelationshipStore) GetGraph(ctx context.Context, limit int) ([]Gr
 
 	// Get top entities by relationship count
 	nodeRows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT e.id, e.name, e.type
+		SELECT e.id, e.name, e.type
 		FROM entities e
 		JOIN (
 			SELECT source_entity_id AS eid FROM entity_relationships
@@ -128,7 +128,7 @@ func (s *EntityRelationshipStore) GetGraph(ctx context.Context, limit int) ([]Gr
 	}
 
 	if len(nodes) == 0 {
-		return nodes, nil, nil
+		return []GraphNode{}, []GraphEdge{}, nil
 	}
 
 	// Get edges between those nodes
@@ -156,6 +156,10 @@ func (s *EntityRelationshipStore) GetGraph(ctx context.Context, limit int) ([]Gr
 	}
 	if err := edgeRows.Err(); err != nil {
 		return nil, nil, err
+	}
+
+	if edges == nil {
+		edges = []GraphEdge{}
 	}
 
 	return nodes, edges, nil

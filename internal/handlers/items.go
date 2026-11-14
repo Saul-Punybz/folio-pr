@@ -23,7 +23,7 @@ type ItemsHandler struct {
 	AI       *ai.OllamaClient
 }
 
-// ListItems handles GET /api/items?status=inbox&limit=50&offset=0.
+// ListItems handles GET /api/items?status=inbox&limit=50&offset=0&date=2026-03-10.
 func (h *ItemsHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	if status == "" {
@@ -36,7 +36,34 @@ func (h *ItemsHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
-	articles, err := h.Articles.ListByStatus(r.Context(), status, limit, offset)
+	// Optional date filter: "today", "yesterday", "YYYY-MM-DD", or "YYYY-MM-DD,YYYY-MM-DD" range.
+	var dateFrom, dateTo *time.Time
+	dateParam := r.URL.Query().Get("date")
+	if dateParam != "" {
+		now := time.Now()
+		switch dateParam {
+		case "today":
+			d := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			dateFrom = &d
+		case "yesterday":
+			d := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, now.Location())
+			d2 := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+			dateFrom = &d
+			dateTo = &d2
+		case "week":
+			d := now.AddDate(0, 0, -7)
+			dateFrom = &d
+		default:
+			// Try parsing as single date YYYY-MM-DD in local timezone
+			if t, err := time.ParseInLocation("2006-01-02", dateParam, now.Location()); err == nil {
+				dateFrom = &t
+				end := t.AddDate(0, 0, 1)
+				dateTo = &end
+			}
+		}
+	}
+
+	articles, err := h.Articles.ListByStatus(r.Context(), status, limit, offset, dateFrom, dateTo)
 	if err != nil {
 		slog.Error("list items", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})

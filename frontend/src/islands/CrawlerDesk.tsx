@@ -1,94 +1,23 @@
-import { useState, useEffect, useCallback } from 'react';
-import { api } from '../lib/api';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { api, type Opportunity, type CrawlDomain, type CrawlRun, type CrawlerStatsResponse } from '../lib/api';
 
-interface CrawlDomain {
-  id: string;
-  domain: string;
-  label: string;
-  category: string;
-  max_depth: number;
-  recrawl_hours: number;
-  priority: number;
-  active: boolean;
-  page_count: number;
-  last_crawled_at: string | null;
-  created_at: string;
+// ── Helpers ────────────────────────────────────────────────────────
+
+function daysUntil(dateStr: string | null): string {
+  if (!dateStr) return '';
+  const deadline = new Date(dateStr).getTime();
+  const now = Date.now();
+  const days = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+  if (days < 0) return `${Math.abs(days)}d pasado`;
+  if (days === 0) return 'Hoy';
+  if (days === 1) return 'Manana';
+  return `${days} dias`;
 }
 
-interface CrawledPage {
-  id: string;
-  url: string;
-  url_hash: string;
-  domain_id: string;
-  title: string;
-  clean_text: string;
-  content_hash: string;
-  summary: string;
-  tags: string[];
-  entities: Record<string, string[]>;
-  sentiment: string;
-  links_out: number;
-  links_in: number;
-  depth: number;
-  status_code: number;
-  content_type: string;
-  content_length: number;
-  changed: boolean;
-  change_summary: string;
-  enriched: boolean;
-  crawl_count: number;
-  first_seen_at: string;
-  last_crawled_at: string;
-  next_crawl_at: string | null;
-  created_at: string;
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return 'N/A';
+  return new Date(dateStr).toLocaleDateString('es-PR', { month: 'short', day: 'numeric', year: 'numeric' });
 }
-
-interface CrawlRun {
-  id: string;
-  status: string;
-  pages_crawled: number;
-  pages_new: number;
-  pages_changed: number;
-  pages_failed: number;
-  started_at: string;
-  finished_at: string | null;
-  error_message: string;
-}
-
-interface GraphNode {
-  id: string;
-  name: string;
-  type: string;
-}
-
-interface GraphEdge {
-  source: string;
-  target: string;
-  relation_type: string;
-  strength: number;
-}
-
-interface CrawlLink {
-  id: string;
-  source_page_id: string;
-  target_url: string;
-  anchor_text: string;
-}
-
-const SENTIMENT_COLORS: Record<string, string> = {
-  positive: 'text-emerald-600 dark:text-emerald-400',
-  neutral: 'text-zinc-500 dark:text-zinc-400',
-  negative: 'text-red-600 dark:text-red-400',
-  unknown: 'text-amber-500 dark:text-amber-400',
-};
-
-const CATEGORY_OPTIONS = [
-  { value: 'gobierno', label: 'Gobierno' },
-  { value: 'legislativo', label: 'Legislativo' },
-  { value: 'judicial', label: 'Judicial' },
-  { value: 'media', label: 'Media' },
-  { value: 'other', label: 'Otro' },
-];
 
 function timeAgo(dateStr: string): string {
   const now = Date.now();
@@ -103,1258 +32,952 @@ function timeAgo(dateStr: string): string {
   return `${days}d`;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+const CATEGORY_COLORS: Record<string, string> = {
+  rfp: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300',
+  grant: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
+  funding: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+  proposal: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  contract: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  fellowship: 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300',
+  scholarship: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300',
+  other: 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300',
+};
 
-type Tab = 'dashboard' | 'dominios' | 'paginas' | 'cambios' | 'grafo';
+const STATUS_COLORS: Record<string, string> = {
+  open: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  closing_soon: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  closed: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400',
+  unknown: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  open: 'Abierta', closing_soon: 'Pronto Cierra', closed: 'Cerrada', unknown: 'Sin Fecha',
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  rfp: 'RFP', grant: 'Grant', funding: 'Fondos', proposal: 'Propuesta',
+  contract: 'Contrato', fellowship: 'Fellowship', scholarship: 'Beca', other: 'Otro',
+};
+
+const DOMAIN_CATEGORY_OPTIONS = [
+  { value: 'government', label: 'Gobierno' },
+  { value: 'legislature', label: 'Legislatura' },
+  { value: 'executive', label: 'Ejecutivo' },
+  { value: 'municipal', label: 'Municipal' },
+  { value: 'news', label: 'Noticias' },
+  { value: 'federal', label: 'Federal' },
+  { value: 'other', label: 'Otro' },
+];
+
+type Tab = 'oportunidades' | 'dominios';
+
+// Process phases for the single-button flow
+type ProcessPhase = 'idle' | 'crawling' | 'extracting' | 'done';
+
+// ── Main Component ─────────────────────────────────────────────────
+// All process state is here so tab switching never kills a running scan.
 
 export default function CrawlerDesk() {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<Tab>('oportunidades');
 
-  const [stats, setStats] = useState<any>(null);
-  const [runs, setRuns] = useState<CrawlRun[]>([]);
-  const [queue, setQueue] = useState<Record<string, number>>({});
+  // ─ Global process state (survives tab switches) ─
+  const [phase, setPhase] = useState<ProcessPhase>('idle');
+  const [statusMsg, setStatusMsg] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshCallbackRef = useRef<(() => void) | null>(null);
+
+  // ─ Shared domain list (used by both tabs) ─
   const [domains, setDomains] = useState<CrawlDomain[]>([]);
-  const [pages, setPages] = useState<CrawledPage[]>([]);
-  const [changedPages, setChangedPages] = useState<CrawledPage[]>([]);
-  const [selectedPage, setSelectedPage] = useState<CrawledPage | null>(null);
-  const [pageDetail, setPageDetail] = useState<any>(null);
-  const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
-  const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
-  const [entityRelations, setEntityRelations] = useState<any>(null);
-
-  const [showAddDomain, setShowAddDomain] = useState(false);
-  const [editingDomain, setEditingDomain] = useState<CrawlDomain | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [domainFilter, setDomainFilter] = useState('all');
-  const [triggering, setTriggering] = useState(false);
-
-  const loadDashboard = useCallback(async () => {
-    try {
-      const [statsData, runsData, queueData] = await Promise.all([
-        api.getCrawlerStats(),
-        api.getCrawlerRuns(5),
-        api.getCrawlerQueue(),
-      ]);
-      setStats(statsData);
-      setRuns(runsData.runs || []);
-      setQueue(queueData.queue || {});
-    } catch (e) {
-      console.error('load dashboard:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [domainsLoaded, setDomainsLoaded] = useState(false);
 
   const loadDomains = useCallback(async () => {
     try {
-      const data = await api.getCrawlerDomains();
-      setDomains(data.domains || []);
-    } catch (e) {
-      console.error('load domains:', e);
-    }
+      const res = await api.getCrawlerDomains();
+      setDomains(res.domains || []);
+      setDomainsLoaded(true);
+    } catch (e) { console.error(e); }
   }, []);
 
-  const loadPages = useCallback(async () => {
-    try {
-      const params: any = { limit: 50 };
-      if (domainFilter !== 'all') params.domain_id = domainFilter;
-      const data = await api.getCrawlerPages(params);
-      setPages(data.pages || []);
-    } catch (e) {
-      console.error('load pages:', e);
-    }
-  }, [domainFilter]);
+  useEffect(() => { loadDomains(); }, [loadDomains]);
 
-  const loadChangedPages = useCallback(async () => {
-    try {
-      const data = await api.getCrawlerChangedPages(50);
-      setChangedPages(data.pages || []);
-    } catch (e) {
-      console.error('load changed pages:', e);
-    }
-  }, []);
-
-  const loadGraphData = useCallback(async () => {
-    try {
-      const data = await api.getCrawlerGraph(50);
-      setGraphData(data);
-    } catch (e) {
-      console.error('load graph:', e);
-    }
-  }, []);
-
+  // Cleanup on unmount
   useEffect(() => {
-    if (activeTab === 'dashboard') {
-      loadDashboard();
-    } else if (activeTab === 'dominios') {
-      loadDomains();
-    } else if (activeTab === 'paginas') {
-      loadPages();
-    } else if (activeTab === 'cambios') {
-      loadChangedPages();
-    } else if (activeTab === 'grafo') {
-      loadGraphData();
-    }
-  }, [activeTab, loadDashboard, loadDomains, loadPages, loadChangedPages, loadGraphData]);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
-  useEffect(() => {
-    if (activeTab === 'paginas') {
-      loadPages();
-    }
-  }, [domainFilter, activeTab, loadPages]);
+  // ─ Single "Escanear" action: crawl + extract in parallel ─
+  const handleFullScan = useCallback(async () => {
+    if (phase !== 'idle') return;
 
-  const handleTriggerCrawl = async () => {
-    setTriggering(true);
+    setPhase('crawling');
+    setStatusMsg('Iniciando... rastreando agencias y analizando paginas');
+
+    // Fire both crawl AND extraction in parallel
+    // Extraction processes existing pages while crawl fetches new ones
+    try { await api.triggerCrawl(); } catch (e) { console.error(e); }
+
+    // Small delay then trigger extraction on existing pages
+    setTimeout(async () => {
+      try { await api.triggerOpportunityExtraction(); } catch (e) { console.error(e); }
+    }, 2000);
+
+    // Move to extracting phase after a short crawl period
+    setTimeout(() => {
+      setPhase('extracting');
+      setStatusMsg('Analizando paginas con AI para detectar oportunidades...');
+    }, 8000);
+
+    // Poll for opportunities appearing
+    let elapsed = 0;
+    const prevTotal = { current: 0 };
+    pollRef.current = setInterval(async () => {
+      elapsed += 5;
+      try {
+        const s = await api.getOpportunityStats();
+        const newTotal = s.total || 0;
+        if (newTotal > prevTotal.current) {
+          setStatusMsg(`${newTotal} oportunidades encontradas...`);
+          prevTotal.current = newTotal;
+          refreshCallbackRef.current?.();
+        } else if (elapsed > 15 && newTotal === 0) {
+          setStatusMsg('Analizando paginas con AI... esto puede tomar unos minutos');
+        }
+      } catch { /* ignore */ }
+
+      // Run for up to 3 minutes
+      if (elapsed >= 180) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setPhase('done');
+        const msg = prevTotal.current > 0
+          ? `Escaneo completo. ${prevTotal.current} oportunidades encontradas.`
+          : 'Escaneo completo. El AI seguira analizando en background.';
+        setStatusMsg(msg);
+        refreshCallbackRef.current?.();
+        setTimeout(() => { setPhase('idle'); setStatusMsg(''); }, 8000);
+      }
+    }, 5000);
+  }, [phase]);
+
+  const isBusy = phase !== 'idle' && phase !== 'done';
+
+  return (
+    <div className="space-y-3">
+
+      {/* ── Global Progress Bar ── visible on any tab */}
+      {phase !== 'idle' && (
+        <div className={`flex items-center gap-3 px-4 py-2.5 rounded-lg text-xs font-medium ${
+          phase === 'done'
+            ? 'bg-green-50 text-green-700 border border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800'
+            : 'bg-violet-50 text-violet-700 border border-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:border-violet-800'
+        }`}>
+          {isBusy && (
+            <div className="relative w-4 h-4 shrink-0">
+              <span className="absolute inset-0 border-2 border-violet-300 dark:border-violet-600 rounded-full" />
+              <span className="absolute inset-0 border-2 border-transparent border-t-violet-600 dark:border-t-violet-300 rounded-full animate-spin" />
+            </div>
+          )}
+          {phase === 'done' && (
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+          )}
+          <span className="flex-1">{statusMsg}</span>
+          {phase === 'crawling' && <span className="text-violet-400 dark:text-violet-500">Fase 1/2 — Crawl</span>}
+          {phase === 'extracting' && <span className="text-violet-400 dark:text-violet-500">Fase 2/2 — AI</span>}
+        </div>
+      )}
+
+      {/* ── Tab Switcher + Scan Button ── */}
+      <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-700 pb-0">
+        <div className="flex gap-1">
+          {(['oportunidades', 'dominios'] as Tab[]).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+                activeTab === tab
+                  ? 'bg-violet-50 text-violet-700 border-b-2 border-violet-500 dark:bg-violet-900/20 dark:text-violet-300'
+                  : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+              }`}
+            >
+              {tab === 'oportunidades' ? 'Oportunidades' : 'Dominios'}
+            </button>
+          ))}
+        </div>
+
+        {/* THE button — always visible in the header */}
+        <button
+          onClick={handleFullScan}
+          disabled={isBusy || domains.length === 0}
+          className="flex items-center gap-2 text-xs bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 disabled:opacity-40 transition-all font-medium shadow-sm mb-1"
+          title={domains.length === 0 ? 'Agrega dominios primero' : 'Escanear agencias y extraer oportunidades'}
+        >
+          {isBusy ? (
+            <>
+              <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              {phase === 'crawling' ? 'Escaneando...' : 'Analizando...'}
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              Escanear
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* ── Tab Content ── */}
+      {activeTab === 'oportunidades' && (
+        <OpportunityTab
+          domains={domains}
+          refreshCallbackRef={refreshCallbackRef}
+          isBusy={isBusy}
+          onScan={handleFullScan}
+        />
+      )}
+      {activeTab === 'dominios' && (
+        <DominiosTab
+          domains={domains}
+          onDomainsChanged={loadDomains}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Opportunity Tab ────────────────────────────────────────────────
+
+function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
+  domains: CrawlDomain[];
+  refreshCallbackRef: React.MutableRefObject<(() => void) | null>;
+  isBusy: boolean;
+  onScan: () => void;
+}) {
+  const [opps, setOpps] = useState<Opportunity[]>([]);
+  const [stats, setStats] = useState<{ total: number; by_status: Record<string, number> } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [domainFilter, setDomainFilter] = useState('');
+  const [sortBy, setSortBy] = useState('created_at');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      const result = await api.triggerCrawl();
-      alert(result.message || 'Crawl iniciado');
-      loadDashboard();
+      const [oppRes, statsRes] = await Promise.all([
+        searchQuery
+          ? api.searchOpportunities(searchQuery, 100)
+          : api.getOpportunities({
+              status: statusFilter || undefined,
+              category: categoryFilter || undefined,
+              domain_id: domainFilter || undefined,
+              sort: sortBy,
+              limit: 100,
+            }),
+        api.getOpportunityStats(),
+      ]);
+      setOpps(oppRes.opportunities || []);
+      setStats(statsRes);
     } catch (e) {
-      console.error('trigger crawl:', e);
-      alert('Error al iniciar crawl');
+      console.error('Failed to load opportunities', e);
     } finally {
-      setTriggering(false);
+      setLoading(false);
     }
+  }, [statusFilter, categoryFilter, domainFilter, sortBy, searchQuery]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Register the refresh callback so parent can trigger refreshes
+  useEffect(() => {
+    refreshCallbackRef.current = loadData;
+    return () => { refreshCallbackRef.current = null; };
+  }, [loadData, refreshCallbackRef]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchQuery(searchInput);
   };
 
-  const handleSearchPages = async () => {
-    if (!searchQuery.trim()) {
-      loadPages();
-      return;
-    }
+  const handleReview = async (id: string) => {
     try {
-      const data = await api.searchCrawlerPages(searchQuery, 50);
-      setPages(data.pages || []);
-    } catch (e) {
-      console.error('search pages:', e);
-    }
+      await api.reviewOpportunity(id);
+      loadData();
+    } catch (err) { console.error('Review error', err); }
   };
 
-  const handleSelectPage = async (page: CrawledPage) => {
-    setSelectedPage(page);
+  const handleDeleteOpp = async (id: string) => {
     try {
-      const data = await api.getCrawlerPage(page.id);
-      setPageDetail(data);
-    } catch (e) {
-      console.error('load page detail:', e);
-    }
+      await api.deleteOpportunity(id);
+      loadData();
+    } catch (err) { console.error('Delete opp error', err); }
   };
 
-  const handleAddDomain = async (formData: Partial<CrawlDomain>) => {
-    try {
-      await api.createCrawlerDomain(formData);
-      setShowAddDomain(false);
-      loadDomains();
-    } catch (e) {
-      console.error('add domain:', e);
-      alert('Error al agregar dominio');
-    }
-  };
+  const openCount = stats?.by_status?.open || 0;
+  const closingSoonCount = stats?.by_status?.closing_soon || 0;
+  const totalCount = stats?.total || 0;
+  const hasDomains = domains.length > 0;
 
-  const handleUpdateDomain = async (id: string, formData: Partial<CrawlDomain>) => {
-    try {
-      await api.updateCrawlerDomain(id, formData);
-      setEditingDomain(null);
-      loadDomains();
-    } catch (e) {
-      console.error('update domain:', e);
-      alert('Error al actualizar dominio');
-    }
-  };
-
-  const handleToggleDomain = async (id: string, active: boolean) => {
-    try {
-      await api.toggleCrawlerDomain(id, active);
-      loadDomains();
-    } catch (e) {
-      console.error('toggle domain:', e);
-    }
-  };
-
-  const handleDeleteDomain = async (id: string) => {
-    if (!confirm('Eliminar este dominio? Se perderan todas las paginas crawleadas.')) return;
-    try {
-      await api.deleteCrawlerDomain(id);
-      loadDomains();
-    } catch (e) {
-      console.error('delete domain:', e);
-      alert('Error al eliminar dominio');
-    }
-  };
-
-  const handleSelectEntity = async (entityId: string) => {
-    setSelectedEntity(entityId);
-    try {
-      const data = await api.getCrawlerEntityRelations(entityId);
-      setEntityRelations(data);
-    } catch (e) {
-      console.error('load entity relations:', e);
-    }
-  };
-
-  if (loading && activeTab === 'dashboard') {
+  // If no domains configured yet, show setup prompt
+  if (!hasDomains) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full" />
+      <div className="text-center py-20">
+        <svg className="w-16 h-16 mx-auto text-zinc-300 dark:text-zinc-600 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>
+        <h3 className="text-base font-semibold text-zinc-600 dark:text-zinc-300">Configura tus agencias</h3>
+        <p className="text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
+          Ve a la pestana <strong>Dominios</strong> para agregar los sitios web de agencias gubernamentales que quieres monitorear.
+        </p>
       </div>
     );
   }
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight text-zinc-900 dark:text-zinc-50 uppercase">
-            Web Crawler
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Sistema automatizado de rastreo web y extraccion de entidades
-          </p>
-        </div>
-      </div>
+    <div className="flex gap-4">
 
-      {/* Tabs */}
-      <div className="flex gap-0 mb-6 border-b-2 border-zinc-200 dark:border-zinc-800">
-        {(['dashboard', 'dominios', 'paginas', 'cambios', 'grafo'] as Tab[]).map((tab) => (
+      {/* ── Left: Domain Sidebar Filter ── */}
+      <div className="w-44 shrink-0 space-y-1">
+        <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider px-2 py-1">
+          Agencias
+        </div>
+        <button
+          onClick={() => { setDomainFilter(''); setSearchQuery(''); setSearchInput(''); }}
+          className={`w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors ${
+            !domainFilter
+              ? 'bg-violet-100 text-violet-700 font-medium dark:bg-violet-900/30 dark:text-violet-300'
+              : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
+          }`}
+        >
+          Todas ({totalCount})
+        </button>
+        {domains.filter(d => d.active).map(d => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-5 py-3 text-sm font-bold uppercase tracking-wide border-b-3 transition-colors ${
-              activeTab === tab
-                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20'
-                : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/30'
+            key={d.id}
+            onClick={() => { setDomainFilter(d.id); setSearchQuery(''); setSearchInput(''); }}
+            className={`w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors truncate ${
+              domainFilter === d.id
+                ? 'bg-violet-100 text-violet-700 font-medium dark:bg-violet-900/30 dark:text-violet-300'
+                : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
             }`}
+            title={d.domain}
           >
-            {tab === 'dashboard' && '📊 '}
-            {tab === 'dominios' && '🌐 '}
-            {tab === 'paginas' && '📄 '}
-            {tab === 'cambios' && '🔄 '}
-            {tab === 'grafo' && '🕸️ '}
-            {tab}
+            <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${d.active ? 'bg-green-500' : 'bg-zinc-300'}`} />
+            {d.label || d.domain}
           </button>
         ))}
       </div>
 
-      {/* Tab Content */}
-      {activeTab === 'dashboard' && (
-        <DashboardTab
-          stats={stats}
-          runs={runs}
-          queue={queue}
-          onTrigger={handleTriggerCrawl}
-          triggering={triggering}
-          onRefresh={loadDashboard}
-        />
-      )}
+      {/* ── Right: Results ── */}
+      <div className="flex-1 min-w-0 space-y-3">
 
-      {activeTab === 'dominios' && (
-        <DominiosTab
-          domains={domains}
-          showAdd={showAddDomain}
-          editing={editingDomain}
-          onShowAdd={() => setShowAddDomain(true)}
-          onHideAdd={() => setShowAddDomain(false)}
-          onAdd={handleAddDomain}
-          onEdit={setEditingDomain}
-          onUpdate={handleUpdateDomain}
-          onCancelEdit={() => setEditingDomain(null)}
-          onToggle={handleToggleDomain}
-          onDelete={handleDeleteDomain}
-        />
-      )}
+        {/* Stats Cards */}
+        {totalCount > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <StatCard label="Abiertas" value={openCount} color="text-green-600 dark:text-green-400" />
+            <StatCard label="Pronto Cierra" value={closingSoonCount} color="text-amber-600 dark:text-amber-400" />
+            <StatCard label="Total" value={totalCount} color="text-violet-600 dark:text-violet-400" />
+          </div>
+        )}
 
-      {activeTab === 'paginas' && (
-        <PaginasTab
-          pages={pages}
-          domains={domains}
-          selectedPage={selectedPage}
-          pageDetail={pageDetail}
-          searchQuery={searchQuery}
-          domainFilter={domainFilter}
-          onSearch={setSearchQuery}
-          onSearchSubmit={handleSearchPages}
-          onFilterChange={setDomainFilter}
-          onSelectPage={handleSelectPage}
-          onRefresh={loadPages}
-        />
-      )}
-
-      {activeTab === 'cambios' && (
-        <CambiosTab
-          pages={changedPages}
-          selectedPage={selectedPage}
-          pageDetail={pageDetail}
-          onSelectPage={handleSelectPage}
-        />
-      )}
-
-      {activeTab === 'grafo' && (
-        <GrafoTab
-          graphData={graphData}
-          selectedEntity={selectedEntity}
-          entityRelations={entityRelations}
-          onSelectEntity={handleSelectEntity}
-        />
-      )}
-    </div>
-  );
-}
-
-function DashboardTab({
-  stats,
-  runs,
-  queue,
-  onTrigger,
-  triggering,
-  onRefresh,
-}: {
-  stats: any;
-  runs: CrawlRun[];
-  queue: Record<string, number>;
-  onTrigger: () => void;
-  triggering: boolean;
-  onRefresh: () => void;
-}) {
-  useEffect(() => {
-    const interval = setInterval(onRefresh, 30000);
-    return () => clearInterval(interval);
-  }, [onRefresh]);
-
-  const latestRun = runs.length > 0 ? runs[0] : null;
-  const queuePending = queue.pending || 0;
-  const queueProcessing = queue.processing || 0;
-  const queueDone = queue.done || 0;
-  const queueFailed = queue.failed || 0;
-  const queueTotal = queuePending + queueProcessing + queueDone + queueFailed;
-
-  return (
-    <div className="space-y-6">
-      {/* Stats cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="p-6 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
-          <div className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-            Total Paginas
-          </div>
-          <div className="text-3xl font-black text-zinc-900 dark:text-zinc-100">
-            {stats?.total_pages?.toLocaleString() || 0}
-          </div>
-        </div>
-        <div className="p-6 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
-          <div className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-            Total Links
-          </div>
-          <div className="text-3xl font-black text-zinc-900 dark:text-zinc-100">
-            {stats?.total_links?.toLocaleString() || 0}
-          </div>
-        </div>
-        <div className="p-6 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
-          <div className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-            Dominios Activos
-          </div>
-          <div className="text-3xl font-black text-zinc-900 dark:text-zinc-100">
-            {stats?.total_domains || 0}
-          </div>
-        </div>
-        <div className="p-6 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
-          <div className="text-sm font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-            Cola Pendiente
-          </div>
-          <div className="text-3xl font-black text-indigo-600 dark:text-indigo-400">
-            {queuePending}
-          </div>
-        </div>
-      </div>
-
-      {/* Latest run + Queue status */}
-      <div className="grid grid-cols-2 gap-6">
-        {/* Latest run */}
-        <div className="p-6 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
-          <h3 className="text-sm font-black text-zinc-700 dark:text-zinc-300 mb-4 uppercase tracking-wide">
-            Ultima Ejecucion
-          </h3>
-          {!latestRun ? (
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">No hay ejecuciones registradas</p>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Estado:</span>
-                <span
-                  className={`px-3 py-1 text-xs font-bold rounded-lg ${
-                    latestRun.status === 'done'
-                      ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
-                      : latestRun.status === 'failed'
-                      ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                      : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+        {/* Filters */}
+        {totalCount > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex gap-1">
+              {[
+                { value: '', label: 'Todas' },
+                { value: 'open', label: 'Abiertas' },
+                { value: 'closing_soon', label: 'Pronto' },
+                { value: 'closed', label: 'Cerradas' },
+              ].map(s => (
+                <button
+                  key={s.value}
+                  onClick={() => { setStatusFilter(s.value); setSearchQuery(''); setSearchInput(''); }}
+                  className={`px-3 py-1 text-xs rounded-full transition-colors ${
+                    statusFilter === s.value
+                      ? 'bg-violet-500 text-white'
+                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
                   }`}
                 >
-                  {latestRun.status}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs font-bold text-zinc-500 uppercase">Crawleadas</div>
-                  <div className="text-2xl font-black text-zinc-900 dark:text-zinc-100">
-                    {latestRun.pages_crawled}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-zinc-500 uppercase">Nuevas</div>
-                  <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
-                    {latestRun.pages_new}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-zinc-500 uppercase">Cambiadas</div>
-                  <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
-                    {latestRun.pages_changed}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-zinc-500 uppercase">Errores</div>
-                  <div className="text-2xl font-black text-red-600 dark:text-red-400">
-                    {latestRun.pages_failed}
-                  </div>
-                </div>
-              </div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400 pt-2 border-t border-zinc-200 dark:border-zinc-700">
-                Inicio: {timeAgo(latestRun.started_at)}
-                {latestRun.finished_at && (
-                  <> | Duracion: {Math.round((new Date(latestRun.finished_at).getTime() - new Date(latestRun.started_at).getTime()) / 1000)}s</>
-                )}
-              </div>
-              {latestRun.error_message && (
-                <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/20 p-2 rounded-lg">
-                  {latestRun.error_message}
-                </div>
-              )}
+                  {s.label}
+                </button>
+              ))}
             </div>
-          )}
-        </div>
 
-        {/* Queue status */}
-        <div className="p-6 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
-          <h3 className="text-sm font-black text-zinc-700 dark:text-zinc-300 mb-4 uppercase tracking-wide">
-            Estado de la Cola
-          </h3>
-          <div className="space-y-3">
-            {queueTotal === 0 ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">Cola vacia</p>
-            ) : (
-              <>
-                {queuePending > 0 && (
-                  <QueueBar label="Pendiente" count={queuePending} total={queueTotal} color="bg-zinc-500" />
-                )}
-                {queueProcessing > 0 && (
-                  <QueueBar label="Procesando" count={queueProcessing} total={queueTotal} color="bg-blue-500" />
-                )}
-                {queueDone > 0 && (
-                  <QueueBar label="Completado" count={queueDone} total={queueTotal} color="bg-emerald-500" />
-                )}
-                {queueFailed > 0 && (
-                  <QueueBar label="Fallido" count={queueFailed} total={queueTotal} color="bg-red-500" />
-                )}
-              </>
+            <select
+              value={categoryFilter}
+              onChange={e => setCategoryFilter(e.target.value)}
+              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300"
+            >
+              <option value="">Categoria</option>
+              {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300"
+            >
+              <option value="created_at">Recientes</option>
+              <option value="deadline">Fecha Limite</option>
+              <option value="amount">Monto</option>
+              <option value="confidence">Confianza</option>
+            </select>
+
+            <form onSubmit={handleSearch} className="flex gap-1 ml-auto">
+              <input
+                type="text"
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                placeholder="Buscar..."
+                className="text-xs bg-zinc-50 border border-zinc-200 rounded px-2 py-1 w-36 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300"
+              />
+              <button type="submit" className="text-xs bg-violet-500 text-white px-2 py-1 rounded hover:bg-violet-600">
+                Ir
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Content */}
+        {loading ? (
+          <div className="text-center py-12 text-zinc-400 text-sm">Cargando...</div>
+        ) : opps.length === 0 ? (
+          <div className="text-center py-16">
+            <svg className="w-10 h-10 mx-auto text-zinc-300 dark:text-zinc-600 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>
+            <h3 className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">No hay oportunidades aun</h3>
+            <p className="text-xs text-zinc-400 mt-1 max-w-xs mx-auto">
+              Presiona <strong>"Escanear"</strong> arriba para rastrear las agencias y detectar grants, RFPs y fondos automaticamente.
+            </p>
+            {!isBusy && (
+              <button
+                onClick={onScan}
+                className="mt-4 text-xs bg-violet-600 text-white px-5 py-2 rounded-lg hover:bg-violet-700 font-medium"
+              >
+                Escanear Ahora
+              </button>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Trigger crawl button */}
-      <div className="flex justify-center">
-        <button
-          onClick={onTrigger}
-          disabled={triggering}
-          className="px-8 py-4 text-base font-bold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-lg shadow-indigo-500/20 uppercase tracking-wide"
-        >
-          {triggering ? 'Iniciando...' : '🚀 Iniciar Crawl'}
-        </button>
+        ) : (
+          <div className="space-y-2">
+            {opps.map(opp => (
+              <OpportunityCard key={opp.id} opp={opp} onReview={handleReview} onDelete={handleDeleteOpp} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function QueueBar({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
-  const percent = (count / total) * 100;
+function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase">{label}</span>
-        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">{count}</span>
-      </div>
-      <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${percent}%` }} />
-      </div>
+    <div className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3">
+      <div className={`text-xl font-bold ${color}`}>{value}</div>
+      <div className="text-[10px] text-zinc-500 dark:text-zinc-400">{label}</div>
     </div>
   );
 }
 
-function DominiosTab({
-  domains,
-  showAdd,
-  editing,
-  onShowAdd,
-  onHideAdd,
-  onAdd,
-  onEdit,
-  onUpdate,
-  onCancelEdit,
-  onToggle,
-  onDelete,
-}: {
-  domains: CrawlDomain[];
-  showAdd: boolean;
-  editing: CrawlDomain | null;
-  onShowAdd: () => void;
-  onHideAdd: () => void;
-  onAdd: (data: Partial<CrawlDomain>) => void;
-  onEdit: (d: CrawlDomain) => void;
-  onUpdate: (id: string, data: Partial<CrawlDomain>) => void;
-  onCancelEdit: () => void;
-  onToggle: (id: string, active: boolean) => void;
-  onDelete: (id: string) => void;
-}) {
-  return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
-          {domains.length} dominios
-        </h3>
-        <button
-          onClick={onShowAdd}
-          className="px-4 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 uppercase"
-        >
-          + Agregar Dominio
-        </button>
-      </div>
-
-      {showAdd && (
-        <DomainForm
-          onSubmit={(data) => {
-            onAdd(data);
-            onHideAdd();
-          }}
-          onCancel={onHideAdd}
-        />
-      )}
-
-      {domains.length === 0 ? (
-        <div className="py-12 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
-          <div className="text-4xl mb-3">🌐</div>
-          <p className="text-base font-bold text-zinc-500 dark:text-zinc-400">Sin dominios configurados</p>
-          <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Agrega un dominio para comenzar a crawlear</p>
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-zinc-50 dark:bg-zinc-800 border-b-2 border-zinc-200 dark:border-zinc-700">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Dominio</th>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Label</th>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Categoria</th>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Depth</th>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Recrawl (h)</th>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Prioridad</th>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Paginas</th>
-                <th className="px-4 py-3 text-left text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Estado</th>
-                <th className="px-4 py-3 text-right text-xs font-black text-zinc-600 dark:text-zinc-400 uppercase">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {domains.map((d) => (
-                editing?.id === d.id ? (
-                  <DomainEditRow
-                    key={d.id}
-                    domain={d}
-                    onSave={(data) => onUpdate(d.id, data)}
-                    onCancel={onCancelEdit}
-                  />
-                ) : (
-                  <tr key={d.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                    <td className="px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">{d.domain}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{d.label}</td>
-                    <td className="px-4 py-3 text-xs font-bold text-zinc-500 uppercase">{d.category}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{d.max_depth}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{d.recrawl_hours}</td>
-                    <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{d.priority}</td>
-                    <td className="px-4 py-3 text-sm font-bold text-zinc-900 dark:text-zinc-100">{d.page_count}</td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => onToggle(d.id, !d.active)}
-                        className={`px-2 py-1 text-xs font-bold rounded-lg ${
-                          d.active
-                            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
-                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
-                        }`}
-                      >
-                        {d.active ? 'Activo' : 'Inactivo'}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => onEdit(d)}
-                          className="px-2 py-1 text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => onDelete(d.id)}
-                          className="px-2 py-1 text-xs font-bold text-red-600 dark:text-red-400 hover:underline"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+// Open URL via backend (macOS `open` command) — works in Wails WebView
+function openExternal(url: string) {
+  fetch(`/api/open-url?url=${encodeURIComponent(url)}`).catch(() => {});
 }
 
-function DomainForm({ onSubmit, onCancel }: { onSubmit: (data: Partial<CrawlDomain>) => void; onCancel: () => void }) {
-  const [domain, setDomain] = useState('');
-  const [label, setLabel] = useState('');
-  const [category, setCategory] = useState('gobierno');
-  const [maxDepth, setMaxDepth] = useState(2);
-  const [recrawlHours, setRecrawlHours] = useState(24);
-  const [priority, setPriority] = useState(5);
+// Strip CSS/JS garbage and navigation boilerplate from page text for display
+function cleanPageContent(text: string): string {
+  if (!text) return '';
 
-  const handleSubmit = () => {
-    if (!domain.trim() || !label.trim()) return;
-    onSubmit({
-      domain: domain.trim(),
-      label: label.trim(),
-      category,
-      max_depth: maxDepth,
-      recrawl_hours: recrawlHours,
-      priority,
-    });
+  // Phase 1: Remove CSS/JS patterns
+  let clean = text
+    .replace(/[\w-]+\s*:\s*[^;\n]{5,};/g, '')    // CSS property: value;
+    .replace(/@[\w-]+[^{]*\{[^}]*\}/g, '')        // @media, @import blocks
+    .replace(/\.-[\w-]+/g, '')                      // CSS class selectors
+    .replace(/--[\w-]+:[^;]+;/g, '')                // CSS custom properties
+    .replace(/\{[^}]{10,}\}/g, '')                  // CSS blocks { ... }
+    .replace(/\b(rgba?|hsla?)\([^)]+\)/g, '')       // color functions
+    .replace(/\b\d+(\.\d+)?(px|rem|em|vh|vw|%)\b/g, '') // CSS units
+    .replace(/!important/gi, '')
+    .replace(/url\([^)]*\)/g, '')                   // url(...)
+    .replace(/(\.is-layout-\w+|\.wp-[\w-]+|\.has-[\w-]+)[^{\n]*/g, '') // WP classes
+    // JS patterns
+    .replace(/\bga\s*\([^)]*\)\s*;?/g, '')          // Google Analytics
+    .replace(/\bgtag\s*\([^)]*\)\s*;?/g, '')        // gtag
+    .replace(/\bfunction\s+\w+\s*\([^)]*\)\s*\{/g, '') // function declarations
+    .replace(/\b(var|let|const)\s+\w+\s*=/g, '')    // variable declarations
+    .replace(/window\.\w+\s*=\s*[^;\n]+;?/g, '')    // window.x = ...
+    .replace(/document\.\w+/g, '')                   // document.xxx
+    .replace(/\btry\s*\{|\bcatch\s*\([^)]*\)\s*\{/g, '') // try/catch
+    .trim();
+
+  // Phase 2: Filter out boilerplate lines
+  const boilerplatePatterns = [
+    /^(skip to|ir al|saltar al)/i,
+    /^(cookie|accept all|aceptar)/i,
+    /^(search|buscar|formulario de)/i,
+    /^(toggle|menu|nav)/i,
+    /^(copyright|all rights|todos los derechos|\u00a9)/i,
+    /^(share|compartir|follow us|s[ií]guenos)/i,
+    /^(back to top|volver|read more|leer m[aá]s)/i,
+    /^(powered by|built with)/i,
+    /^(home|inicio|contact|about)\s*$/i,
+    /^(facebook|twitter|instagram|linkedin|youtube|whatsapp|telegram)\s*$/i,
+    /^(tel|fax|email|phone|correo)\s*:/i,
+    /^(select|choose|escoge|selecciona)\s+(language|idioma|a page)/i,
+  ];
+
+  const lines = clean.split('\n').filter(l => {
+    const trimmed = l.trim();
+    if (!trimmed || trimmed.length < 4) return false;
+    // Skip CSS/code
+    if (trimmed.includes('{') || trimmed.includes('}')) return false;
+    if (/^[.#@]/.test(trimmed) && !trimmed.startsWith('...')) return false;
+    if (/:\s*(linear-gradient|rgb|#[0-9a-f]{3,})/i.test(trimmed)) return false;
+    if (/^(margin|padding|border|display|position|font|color|background|width|height|overflow|flex)/i.test(trimmed)) return false;
+    // Skip JS
+    if (/^(var |let |const |function |if\s*\(|for\s*\(|}\s*$|{\s*$)/i.test(trimmed)) return false;
+    // Skip boilerplate
+    for (const pat of boilerplatePatterns) {
+      if (pat.test(trimmed)) return false;
+    }
+    // Skip very short lines that look like nav items (1-2 words, under 25 chars)
+    if (trimmed.length < 25 && trimmed.split(/\s+/).length <= 2 && !/[.!?]$/.test(trimmed)) {
+      // Allow if it looks like a header (capitalized, contains numbers, or is a title)
+      if (!/[A-ZÁÉÍÓÚÑ]/.test(trimmed[0]) || trimmed === trimmed.toUpperCase()) return false;
+    }
+    return true;
+  });
+
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function OpportunityCard({ opp, onReview, onDelete }: { opp: Opportunity; onReview: (id: string) => void; onDelete: (id: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const [pageContent, setPageContent] = useState<string | null>(null);
+  const [loadingContent, setLoadingContent] = useState(false);
+  const deadlineDays = daysUntil(opp.deadline);
+  const isClosing = opp.status === 'closing_soon';
+
+  // Fetch full page content when expanded
+  const loadPageContent = async () => {
+    if (pageContent || !opp.page_id) return;
+    setLoadingContent(true);
+    try {
+      const res = await api.getCrawlerPage(opp.page_id);
+      setPageContent(res.page?.clean_text || 'Sin contenido disponible');
+    } catch {
+      setPageContent('Error cargando contenido');
+    } finally {
+      setLoadingContent(false);
+    }
+  };
+
+  const handleExpand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next) loadPageContent();
   };
 
   return (
-    <div className="mb-6 p-4 bg-indigo-50 dark:bg-indigo-950/20 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl">
-      <h3 className="text-sm font-black text-indigo-700 dark:text-indigo-300 mb-3 uppercase">Nuevo Dominio</h3>
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <div>
-          <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1 uppercase">Dominio</label>
-          <input
-            type="text"
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            placeholder="ejemplo.com"
-            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1 uppercase">Label</label>
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="Mi Sitio"
-            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1 uppercase">Categoria</label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {CATEGORY_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1 uppercase">Max Depth (1-5)</label>
-          <input
-            type="number"
-            min={1}
-            max={5}
-            value={maxDepth}
-            onChange={(e) => setMaxDepth(parseInt(e.target.value))}
-            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1 uppercase">Recrawl (horas)</label>
-          <input
-            type="number"
-            min={1}
-            value={recrawlHours}
-            onChange={(e) => setRecrawlHours(parseInt(e.target.value))}
-            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-zinc-600 dark:text-zinc-400 mb-1 uppercase">Prioridad (1-10)</label>
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={priority}
-            onChange={(e) => setPriority(parseInt(e.target.value))}
-            className="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
+    <div
+      className={`bg-white dark:bg-zinc-800 border rounded-lg transition-all ${
+        expanded
+          ? 'border-violet-300 dark:border-violet-700 shadow-md'
+          : 'border-zinc-200 dark:border-zinc-700 hover:border-violet-200 dark:hover:border-violet-800'
+      }`}
+    >
+      {/* Clickable header */}
+      <div className="p-4 cursor-pointer" onClick={handleExpand}>
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            {/* Badges */}
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full ${CATEGORY_COLORS[opp.category] || CATEGORY_COLORS.other}`}>
+                {CATEGORY_LABELS[opp.category] || opp.category}
+              </span>
+              <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full ${STATUS_COLORS[opp.status] || STATUS_COLORS.unknown} ${isClosing ? 'animate-pulse' : ''}`}>
+                {STATUS_LABELS[opp.status] || opp.status}
+              </span>
+              {opp.reviewed && (
+                <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                  Revisada
+                </span>
+              )}
+              {opp.confidence > 0 && (
+                <span className="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full bg-zinc-100 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
+                  {opp.confidence}%
+                </span>
+              )}
+            </div>
+
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-tight">
+              {opp.title || 'Sin titulo'}
+            </h3>
+            {opp.agency && (
+              <p className="text-xs text-violet-600 dark:text-violet-400 mt-0.5">{opp.agency}</p>
+            )}
+
+            {!expanded && opp.summary && (
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 line-clamp-1">{opp.summary}</p>
+            )}
+
+            <div className="flex flex-wrap gap-3 mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              {opp.amount && (
+                <span className="text-green-600 dark:text-green-400 font-medium">{opp.amount}</span>
+              )}
+              {opp.deadline && (
+                <span className={isClosing ? 'text-red-600 dark:text-red-400 font-medium' : ''}>
+                  {formatDate(opp.deadline)} ({deadlineDays})
+                </span>
+              )}
+            </div>
+          </div>
+
+          <svg className={`w-4 h-4 text-zinc-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
         </div>
       </div>
-      <div className="flex gap-2 justify-end">
-        <button
-          onClick={onCancel}
-          className="px-4 py-2 text-sm font-bold text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-        >
-          Cancelar
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={!domain.trim() || !label.trim()}
-          className="px-4 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
-          Agregar
-        </button>
-      </div>
+
+      {/* Expanded: full detail + page content reader */}
+      {expanded && (
+        <div className="border-t border-zinc-100 dark:border-zinc-700">
+          {/* Info section */}
+          <div className="px-4 py-3 space-y-3">
+            {opp.summary && (
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">{opp.summary}</p>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              {opp.contact_name && (
+                <div>
+                  <span className="text-zinc-400">Contacto:</span>{' '}
+                  <span className="text-zinc-700 dark:text-zinc-300">{opp.contact_name}</span>
+                </div>
+              )}
+              {opp.contact_email && (
+                <div>
+                  <span className="text-zinc-400">Email:</span>{' '}
+                  <button onClick={(e) => { e.stopPropagation(); openExternal(`mailto:${opp.contact_email}`); }}
+                    className="text-violet-600 dark:text-violet-400 hover:underline">
+                    {opp.contact_email}
+                  </button>
+                </div>
+              )}
+              {opp.source_url && (
+                <div className="col-span-2">
+                  <span className="text-zinc-400">Fuente:</span>{' '}
+                  <button onClick={(e) => { e.stopPropagation(); openExternal(opp.source_url); }}
+                    className="text-violet-600 dark:text-violet-400 hover:underline text-[11px] break-all">
+                    {opp.source_url}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2">
+              {opp.source_url && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); openExternal(opp.source_url); }}
+                  className="text-xs bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700 font-medium flex items-center gap-1"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                  Abrir en Navegador
+                </button>
+              )}
+              {!opp.reviewed && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onReview(opp.id); }}
+                  className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 font-medium"
+                >
+                  Marcar Revisada
+                </button>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); onDelete(opp.id); }}
+                className="text-xs bg-zinc-100 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50 dark:bg-zinc-700 dark:text-red-400 dark:hover:bg-red-900/30 font-medium"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+
+          {/* Page content reader */}
+          <div className="border-t border-zinc-100 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/30">
+            <div className="px-4 py-2 flex items-center gap-2 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              Contenido de la pagina
+            </div>
+            <div className="px-4 pb-4 max-h-80 overflow-y-auto">
+              {loadingContent ? (
+                <div className="text-xs text-zinc-400 py-4 text-center">Cargando contenido...</div>
+              ) : pageContent ? (
+                (() => {
+                  const cleaned = cleanPageContent(pageContent);
+                  return cleaned ? (
+                    <div className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">
+                      {cleaned.slice(0, 5000)}
+                      {cleaned.length > 5000 && (
+                        <span className="text-zinc-400 italic block mt-2">... contenido truncado</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-zinc-400 py-4 text-center">
+                      Contenido no disponible en texto limpio.
+                      {opp.source_url && (
+                        <button onClick={() => openExternal(opp.source_url)} className="ml-1 text-violet-500 underline">
+                          Ver en navegador
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="text-xs text-zinc-400 py-4 text-center">Sin contenido disponible</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function DomainEditRow({
-  domain,
-  onSave,
-  onCancel,
-}: {
-  domain: CrawlDomain;
-  onSave: (data: Partial<CrawlDomain>) => void;
-  onCancel: () => void;
+// ── Dominios Tab ───────────────────────────────────────────────────
+
+function DominiosTab({ domains, onDomainsChanged }: {
+  domains: CrawlDomain[];
+  onDomainsChanged: () => void;
 }) {
+  const [runs, setRuns] = useState<CrawlRun[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getCrawlerRuns(5).then(r => setRuns(r.runs || [])).catch(() => {});
+  }, []);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const handleToggle = async (id: string, active: boolean) => {
+    try {
+      await api.toggleCrawlerDomain(id, !active);
+      onDomainsChanged();
+    } catch (err) {
+      console.error('Toggle domain error', err);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.deleteCrawlerDomain(id);
+      setConfirmDeleteId(null);
+      onDomainsChanged();
+    } catch (err) {
+      console.error('Delete domain error', err);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+            Agencias Configuradas ({domains.length})
+          </h3>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="text-xs bg-violet-500 text-white px-3 py-1.5 rounded hover:bg-violet-600"
+          >
+            {showForm ? 'Cancelar' : '+ Agregar Dominio'}
+          </button>
+        </div>
+
+        {showForm && (
+          <DomainForm onCreated={() => { setShowForm(false); onDomainsChanged(); }} />
+        )}
+
+        {domains.length === 0 ? (
+          <div className="text-center py-8 text-zinc-400 text-sm">No hay dominios. Agrega uno para comenzar.</div>
+        ) : (
+          <div className="space-y-2">
+            {domains.map(d => (
+              editingId === d.id ? (
+                <DomainEditRow key={d.id} domain={d} onSaved={() => { setEditingId(null); onDomainsChanged(); }} onCancel={() => setEditingId(null)} />
+              ) : (
+                <div key={d.id} className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 flex items-center gap-3">
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${d.active ? 'bg-green-500' : 'bg-zinc-300'}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{d.label || d.domain}</div>
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {d.domain} &middot; {d.category} &middot; {d.page_count} pag
+                      {d.last_crawled_at && ` \u00b7 ${timeAgo(d.last_crawled_at)}`}
+                    </div>
+                  </div>
+                  <div className="flex gap-1 text-[10px] shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleToggle(d.id, d.active); }}
+                      className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
+                    >
+                      {d.active ? 'Pausar' : 'Activar'}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditingId(d.id); }}
+                      className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
+                    >
+                      Editar
+                    </button>
+                    {confirmDeleteId === d.id ? (
+                      <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(d.id); }}
+                          className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 font-semibold"
+                        >
+                          Confirmar
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                          className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200"
+                        >
+                          No
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(d.id); }}
+                        className="px-2 py-1 rounded bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100"
+                      >
+                        Eliminar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Runs */}
+      {runs.length > 0 && (
+        <div className="border-t border-zinc-200 dark:border-zinc-700 pt-4">
+          <h4 className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-2">Ejecuciones Recientes</h4>
+          <div className="space-y-1">
+            {runs.slice(0, 5).map(run => (
+              <div key={run.id} className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  run.status === 'completed' ? 'bg-green-500' : run.status === 'running' ? 'bg-blue-500 animate-pulse' : 'bg-red-500'
+                }`} />
+                <span>{run.pages_crawled} pag, {run.pages_new} nuevas</span>
+                <span className="text-zinc-400">{timeAgo(run.started_at)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DomainForm({ onCreated }: { onCreated: () => void }) {
+  const [domain, setDomain] = useState('');
+  const [label, setLabel] = useState('');
+  const [category, setCategory] = useState('government');
+  const [maxDepth, setMaxDepth] = useState(3);
+  const [recrawlHours, setRecrawlHours] = useState(168);
+  const [priority, setPriority] = useState(5);
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!domain.trim()) return;
+    setSaving(true);
+    try {
+      await api.createCrawlerDomain({ domain: domain.trim(), label, category, max_depth: maxDepth, recrawl_hours: recrawlHours, priority });
+      onCreated();
+    } catch (err) {
+      console.error('Create domain error', err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg p-4 space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-[10px] text-zinc-500 mb-0.5">Dominio *</label>
+          <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="www.ejemplo.gov"
+            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+        </div>
+        <div>
+          <label className="block text-[10px] text-zinc-500 mb-0.5">Nombre</label>
+          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Agencia X"
+            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+        </div>
+        <div>
+          <label className="block text-[10px] text-zinc-500 mb-0.5">Categoria</label>
+          <select value={category} onChange={e => setCategory(e.target.value)}
+            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200">
+            {DOMAIN_CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] text-zinc-500 mb-0.5">Prioridad (1-10)</label>
+          <input type="number" min={1} max={10} value={priority} onChange={e => setPriority(+e.target.value)}
+            className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1.5 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+        </div>
+      </div>
+      <button type="submit" disabled={saving}
+        className="text-xs bg-violet-500 text-white px-4 py-1.5 rounded hover:bg-violet-600 disabled:opacity-50">
+        {saving ? 'Guardando...' : 'Crear Dominio'}
+      </button>
+    </form>
+  );
+}
+
+function DomainEditRow({ domain, onSaved, onCancel }: { domain: CrawlDomain; onSaved: () => void; onCancel: () => void }) {
   const [label, setLabel] = useState(domain.label);
   const [category, setCategory] = useState(domain.category);
   const [maxDepth, setMaxDepth] = useState(domain.max_depth);
   const [recrawlHours, setRecrawlHours] = useState(domain.recrawl_hours);
   const [priority, setPriority] = useState(domain.priority);
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    onSave({ label, category, max_depth: maxDepth, recrawl_hours: recrawlHours, priority });
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.updateCrawlerDomain(domain.id, { label, category, max_depth: maxDepth, recrawl_hours: recrawlHours, priority });
+      onSaved();
+    } catch (err) {
+      console.error('Update domain error', err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <tr className="bg-indigo-50 dark:bg-indigo-950/20">
-      <td className="px-4 py-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">{domain.domain}</td>
-      <td className="px-4 py-3">
-        <input
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className="w-full px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded text-zinc-900 dark:text-zinc-100"
-        />
-      </td>
-      <td className="px-4 py-3">
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="w-full px-2 py-1 text-xs bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded text-zinc-900 dark:text-zinc-100"
-        >
-          {CATEGORY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
+    <div className="bg-violet-50/50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 rounded-lg p-3 space-y-2">
+      <div className="text-xs font-medium text-violet-700 dark:text-violet-300">{domain.domain}</div>
+      <div className="grid grid-cols-3 gap-2">
+        <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Nombre"
+          className="text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
+        <select value={category} onChange={e => setCategory(e.target.value)}
+          className="text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 dark:text-zinc-200">
+          {DOMAIN_CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-      </td>
-      <td className="px-4 py-3">
-        <input
-          type="number"
-          min={1}
-          max={5}
-          value={maxDepth}
-          onChange={(e) => setMaxDepth(parseInt(e.target.value))}
-          className="w-16 px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded text-zinc-900 dark:text-zinc-100"
-        />
-      </td>
-      <td className="px-4 py-3">
-        <input
-          type="number"
-          min={1}
-          value={recrawlHours}
-          onChange={(e) => setRecrawlHours(parseInt(e.target.value))}
-          className="w-16 px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded text-zinc-900 dark:text-zinc-100"
-        />
-      </td>
-      <td className="px-4 py-3">
-        <input
-          type="number"
-          min={1}
-          max={10}
-          value={priority}
-          onChange={(e) => setPriority(parseInt(e.target.value))}
-          className="w-16 px-2 py-1 text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 rounded text-zinc-900 dark:text-zinc-100"
-        />
-      </td>
-      <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{domain.page_count}</td>
-      <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">-</td>
-      <td className="px-4 py-3">
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={handleSave}
-            className="px-2 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline"
-          >
-            Guardar
-          </button>
-          <button
-            onClick={onCancel}
-            className="px-2 py-1 text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:underline"
-          >
-            Cancelar
-          </button>
-        </div>
-      </td>
-    </tr>
-  );
-}
-
-function PaginasTab({
-  pages,
-  domains,
-  selectedPage,
-  pageDetail,
-  searchQuery,
-  domainFilter,
-  onSearch,
-  onSearchSubmit,
-  onFilterChange,
-  onSelectPage,
-  onRefresh,
-}: {
-  pages: CrawledPage[];
-  domains: CrawlDomain[];
-  selectedPage: CrawledPage | null;
-  pageDetail: any;
-  searchQuery: string;
-  domainFilter: string;
-  onSearch: (q: string) => void;
-  onSearchSubmit: () => void;
-  onFilterChange: (f: string) => void;
-  onSelectPage: (p: CrawledPage) => void;
-  onRefresh: () => void;
-}) {
-  return (
-    <div className="flex gap-6">
-      {/* Left: page list */}
-      <div className="flex-1">
-        {/* Top bar */}
-        <div className="flex gap-3 mb-4">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => onSearch(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && onSearchSubmit()}
-            placeholder="Buscar paginas..."
-            className="flex-1 px-4 py-2 text-sm bg-white dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <select
-            value={domainFilter}
-            onChange={(e) => onFilterChange(e.target.value)}
-            className="px-4 py-2 text-sm bg-white dark:bg-zinc-800 border-2 border-zinc-300 dark:border-zinc-600 rounded-lg text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="all">Todos los dominios</option>
-            {domains.map((d) => (
-              <option key={d.id} value={d.id}>{d.label}</option>
-            ))}
-          </select>
-          <button
-            onClick={onRefresh}
-            className="px-4 py-2 text-sm font-bold text-indigo-600 dark:text-indigo-400 border-2 border-indigo-300 dark:border-indigo-700 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/20 transition-colors"
-          >
-            Actualizar
-          </button>
-        </div>
-
-        {/* Page list */}
-        {pages.length === 0 ? (
-          <div className="py-12 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
-            <div className="text-4xl mb-3">📄</div>
-            <p className="text-base font-bold text-zinc-500 dark:text-zinc-400">No hay paginas</p>
-            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Inicia un crawl para recopilar paginas</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide mb-3">
-              {pages.length} paginas
-            </p>
-            {pages.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => onSelectPage(p)}
-                className={`w-full text-left p-3 rounded-lg border-2 transition-all ${
-                  selectedPage?.id === p.id
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-400 dark:border-indigo-600'
-                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">{p.title || 'Sin titulo'}</div>
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">{p.url}</div>
-                    {p.summary && (
-                      <div className="text-xs text-zinc-600 dark:text-zinc-400 line-clamp-1 mt-1">{p.summary}</div>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
-                      p.status_code === 200
-                        ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600'
-                        : 'bg-red-100 dark:bg-red-900/30 text-red-600'
-                    }`}>
-                      {p.status_code}
-                    </span>
-                    {p.changed && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600">
-                        CAMBIO
-                      </span>
-                    )}
-                    {p.enriched && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600">
-                        ENRIQUECIDA
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 mt-2 text-[10px] text-zinc-500">
-                  <span>Links: {p.links_out}/{p.links_in}</span>
-                  <span>{timeAgo(p.last_crawled_at)}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+        <input type="number" value={priority} onChange={e => setPriority(+e.target.value)} min={1} max={10}
+          className="text-xs border border-zinc-200 dark:border-zinc-700 rounded px-2 py-1 bg-white dark:bg-zinc-800 dark:text-zinc-200" />
       </div>
-
-      {/* Right: detail panel */}
-      {selectedPage && (
-        <div className="w-96 shrink-0">
-          <PageDetail page={selectedPage} detail={pageDetail} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PageDetail({ page, detail }: { page: CrawledPage; detail: any }) {
-  return (
-    <div className="p-4 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl max-h-[700px] overflow-y-auto">
-      <h3 className="text-lg font-black text-zinc-900 dark:text-zinc-100 mb-2">{page.title || 'Sin titulo'}</h3>
-      <a
-        href={page.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline break-all"
-      >
-        {page.url}
-      </a>
-
-      {page.summary && (
-        <div className="mt-4">
-          <h4 className="text-xs font-bold text-zinc-500 uppercase mb-1">Summary</h4>
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">{page.summary}</p>
-        </div>
-      )}
-
-      {page.tags.length > 0 && (
-        <div className="mt-4">
-          <h4 className="text-xs font-bold text-zinc-500 uppercase mb-2">Tags</h4>
-          <div className="flex flex-wrap gap-1">
-            {page.tags.map((tag, i) => (
-              <span
-                key={i}
-                className="px-2 py-0.5 text-xs font-medium rounded-lg bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {page.entities && Object.keys(page.entities).length > 0 && (
-        <div className="mt-4">
-          <h4 className="text-xs font-bold text-zinc-500 uppercase mb-2">Entidades</h4>
-          <div className="space-y-2">
-            {Object.entries(page.entities).map(([type, items]) => (
-              <div key={type}>
-                <div className="text-xs font-bold text-zinc-600 dark:text-zinc-400 capitalize">{type}:</div>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {(items as string[]).map((item, i) => (
-                    <span
-                      key={i}
-                      className="px-2 py-0.5 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-                    >
-                      {item}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {page.sentiment !== 'unknown' && (
-        <div className="mt-4">
-          <h4 className="text-xs font-bold text-zinc-500 uppercase mb-1">Sentiment</h4>
-          <span className={`text-sm font-bold capitalize ${SENTIMENT_COLORS[page.sentiment] || ''}`}>
-            {page.sentiment}
-          </span>
-        </div>
-      )}
-
-      <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700">
-        <h4 className="text-xs font-bold text-zinc-500 uppercase mb-2">Metadata</h4>
-        <div className="space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
-          <div>Status: <span className="font-bold">{page.status_code}</span></div>
-          <div>Depth: <span className="font-bold">{page.depth}</span></div>
-          <div>Links Out: <span className="font-bold">{page.links_out}</span></div>
-          <div>Links In: <span className="font-bold">{page.links_in}</span></div>
-          <div>Content: <span className="font-bold">{formatBytes(page.content_length)}</span></div>
-          <div>Crawl Count: <span className="font-bold">{page.crawl_count}</span></div>
-          <div>First Seen: <span className="font-bold">{timeAgo(page.first_seen_at)}</span></div>
-          <div>Last Crawled: <span className="font-bold">{timeAgo(page.last_crawled_at)}</span></div>
-        </div>
-      </div>
-
-      {page.changed && page.change_summary && (
-        <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-          <h4 className="text-xs font-bold text-amber-700 dark:text-amber-300 uppercase mb-1">Cambio Detectado</h4>
-          <p className="text-xs text-amber-600 dark:text-amber-400">{page.change_summary}</p>
-        </div>
-      )}
-
-      {detail?.links_out && detail.links_out.length > 0 && (
-        <div className="mt-4">
-          <h4 className="text-xs font-bold text-zinc-500 uppercase mb-2">Links Out ({detail.links_out.length})</h4>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {detail.links_out.slice(0, 10).map((link: CrawlLink, i: number) => (
-              <div key={i} className="text-xs text-zinc-600 dark:text-zinc-400 truncate">
-                <span className="font-medium">{link.anchor_text || 'No text'}</span> → {link.target_url}
-              </div>
-            ))}
-            {detail.links_out.length > 10 && (
-              <div className="text-xs text-zinc-500">+{detail.links_out.length - 10} mas</div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CambiosTab({
-  pages,
-  selectedPage,
-  pageDetail,
-  onSelectPage,
-}: {
-  pages: CrawledPage[];
-  selectedPage: CrawledPage | null;
-  pageDetail: any;
-  onSelectPage: (p: CrawledPage) => void;
-}) {
-  return (
-    <div className="flex gap-6">
-      {/* Left: changed pages list */}
-      <div className="flex-1">
-        {pages.length === 0 ? (
-          <div className="py-12 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
-            <div className="text-4xl mb-3">🔄</div>
-            <p className="text-base font-bold text-zinc-500 dark:text-zinc-400">No hay cambios recientes</p>
-            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Los cambios detectados apareceran aqui</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">
-              {pages.length} paginas cambiadas
-            </p>
-            {pages.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => onSelectPage(p)}
-                className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-                  selectedPage?.id === p.id
-                    ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-400 dark:border-amber-600'
-                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-base font-bold text-zinc-900 dark:text-zinc-100">{p.title || 'Sin titulo'}</div>
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-1">{p.url}</div>
-                    {p.change_summary && (
-                      <div className="text-sm text-amber-700 dark:text-amber-300 mt-2 font-medium">
-                        {p.change_summary}
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-xs text-zinc-500 shrink-0">{timeAgo(p.last_crawled_at)}</div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Right: detail panel */}
-      {selectedPage && (
-        <div className="w-96 shrink-0">
-          <PageDetail page={selectedPage} detail={pageDetail} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GrafoTab({
-  graphData,
-  selectedEntity,
-  entityRelations,
-  onSelectEntity,
-}: {
-  graphData: { nodes: GraphNode[]; edges: GraphEdge[] } | null;
-  selectedEntity: string | null;
-  entityRelations: any;
-  onSelectEntity: (id: string) => void;
-}) {
-  if (!graphData || graphData.nodes.length === 0) {
-    return (
-      <div className="py-12 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
-        <div className="text-4xl mb-3">🕸️</div>
-        <p className="text-base font-bold text-zinc-500 dark:text-zinc-400">No hay datos de grafo</p>
-        <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">Las entidades apareceran cuando las paginas sean enriquecidas</p>
-      </div>
-    );
-  }
-
-  const nodesByType: Record<string, GraphNode[]> = {};
-  graphData.nodes.forEach((node) => {
-    if (!nodesByType[node.type]) nodesByType[node.type] = [];
-    nodesByType[node.type].push(node);
-  });
-
-  const typeColors: Record<string, string> = {
-    person: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700',
-    organization: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-300 dark:border-green-700',
-    place: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700',
-    other: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-700',
-  };
-
-  const typeEmojis: Record<string, string> = {
-    person: '👤',
-    organization: '🏛️',
-    place: '📍',
-    other: '🔖',
-  };
-
-  return (
-    <div className="flex gap-6">
-      {/* Left: entity list */}
-      <div className="w-80 shrink-0">
-        <h3 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-3">
-          Entidades ({graphData.nodes.length})
-        </h3>
-        <div className="space-y-4">
-          {Object.entries(nodesByType).map(([type, nodes]) => (
-            <div key={type} className="p-3 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl">
-              <h4 className="text-sm font-black text-zinc-700 dark:text-zinc-300 mb-2 uppercase flex items-center gap-2">
-                <span>{typeEmojis[type] || '🔖'}</span>
-                <span>{type}</span>
-                <span className="text-xs font-bold text-zinc-500">({nodes.length})</span>
-              </h4>
-              <div className="space-y-1">
-                {nodes.map((node) => {
-                  const connectionCount = graphData.edges.filter((e) => e.source === node.id || e.target === node.id).length;
-                  return (
-                    <button
-                      key={node.id}
-                      onClick={() => onSelectEntity(node.id)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-all border ${
-                        selectedEntity === node.id
-                          ? typeColors[type] || typeColors.other
-                          : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span>{node.name}</span>
-                        {connectionCount > 0 && (
-                          <span className="text-xs px-1.5 py-0.5 rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400">
-                            {connectionCount}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Right: relationships */}
-      <div className="flex-1">
-        {!selectedEntity ? (
-          <div className="flex flex-col items-center justify-center h-64">
-            <div className="text-5xl mb-4">🕸️</div>
-            <p className="text-lg font-bold text-zinc-600 dark:text-zinc-400">Selecciona una entidad</p>
-            <p className="text-sm text-zinc-400 dark:text-zinc-500 mt-1">para ver sus relaciones</p>
-          </div>
-        ) : entityRelations ? (
-          <div className="space-y-4">
-            <h3 className="text-lg font-black text-zinc-900 dark:text-zinc-100 uppercase">
-              Relaciones de {graphData.nodes.find((n) => n.id === selectedEntity)?.name}
-            </h3>
-            {entityRelations.relationships && entityRelations.relationships.length === 0 ? (
-              <p className="text-sm text-zinc-500 dark:text-zinc-400">No hay relaciones registradas</p>
-            ) : (
-              <div className="space-y-3">
-                {entityRelations.relationships?.map((rel: any, i: number) => (
-                  <div
-                    key={i}
-                    className="p-4 bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{rel.source_name}</div>
-                      <div className="px-2 py-1 text-xs font-bold rounded-lg bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
-                        {rel.relation_type}
-                      </div>
-                      <div className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{rel.target_name}</div>
-                    </div>
-                    <div className="mt-2">
-                      <div className="w-full h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-indigo-500 rounded-full"
-                          style={{ width: `${Math.min(rel.strength * 100, 100)}%` }}
-                        />
-                      </div>
-                      <div className="text-xs text-zinc-500 mt-1">Strength: {(rel.strength * 100).toFixed(0)}%</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full" />
-          </div>
-        )}
+      <div className="flex gap-2">
+        <button onClick={handleSave} disabled={saving}
+          className="text-[10px] bg-violet-500 text-white px-3 py-1 rounded hover:bg-violet-600 disabled:opacity-50">
+          {saving ? 'Guardando...' : 'Guardar'}
+        </button>
+        <button onClick={onCancel}
+          className="text-[10px] bg-zinc-200 text-zinc-600 px-3 py-1 rounded hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600">
+          Cancelar
+        </button>
       </div>
     </div>
   );

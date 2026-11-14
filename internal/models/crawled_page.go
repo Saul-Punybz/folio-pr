@@ -31,8 +31,9 @@ type CrawledPage struct {
 	ContentLength int             `json:"content_length"`
 	Changed       bool            `json:"changed"`
 	ChangeSummary string          `json:"change_summary"`
-	Enriched      bool            `json:"enriched"`
-	CrawlCount    int             `json:"crawl_count"`
+	Enriched           bool            `json:"enriched"`
+	OpportunityChecked bool            `json:"opportunity_checked"`
+	CrawlCount         int             `json:"crawl_count"`
 	FirstSeenAt   time.Time       `json:"first_seen_at"`
 	LastCrawledAt time.Time       `json:"last_crawled_at"`
 	NextCrawlAt   *time.Time      `json:"next_crawl_at,omitempty"`
@@ -109,14 +110,14 @@ func (s *CrawledPageStore) GetByID(ctx context.Context, id uuid.UUID) (*CrawledP
 		SELECT id, url, url_hash, domain_id, title, clean_text, content_hash,
 		       summary, tags, entities, sentiment, links_out, links_in,
 		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, crawl_count,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
 		       first_seen_at, last_crawled_at, next_crawl_at, created_at
 		FROM crawled_pages WHERE id = $1
 	`, id).Scan(
 		&p.ID, &p.URL, &p.URLHash, &p.DomainID, &p.Title, &p.CleanText, &p.ContentHash,
 		&p.Summary, &p.Tags, &p.Entities, &p.Sentiment, &p.LinksOut, &p.LinksIn,
 		&p.Depth, &p.StatusCode, &p.ContentType, &p.ContentLength,
-		&p.Changed, &p.ChangeSummary, &p.Enriched, &p.CrawlCount,
+		&p.Changed, &p.ChangeSummary, &p.Enriched, &p.OpportunityChecked, &p.CrawlCount,
 		&p.FirstSeenAt, &p.LastCrawledAt, &p.NextCrawlAt, &p.CreatedAt,
 	)
 	if err != nil {
@@ -131,14 +132,14 @@ func (s *CrawledPageStore) GetByURLHash(ctx context.Context, urlHash string) (*C
 		SELECT id, url, url_hash, domain_id, title, clean_text, content_hash,
 		       summary, tags, entities, sentiment, links_out, links_in,
 		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, crawl_count,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
 		       first_seen_at, last_crawled_at, next_crawl_at, created_at
 		FROM crawled_pages WHERE url_hash = $1
 	`, urlHash).Scan(
 		&p.ID, &p.URL, &p.URLHash, &p.DomainID, &p.Title, &p.CleanText, &p.ContentHash,
 		&p.Summary, &p.Tags, &p.Entities, &p.Sentiment, &p.LinksOut, &p.LinksIn,
 		&p.Depth, &p.StatusCode, &p.ContentType, &p.ContentLength,
-		&p.Changed, &p.ChangeSummary, &p.Enriched, &p.CrawlCount,
+		&p.Changed, &p.ChangeSummary, &p.Enriched, &p.OpportunityChecked, &p.CrawlCount,
 		&p.FirstSeenAt, &p.LastCrawledAt, &p.NextCrawlAt, &p.CreatedAt,
 	)
 	if err != nil {
@@ -155,7 +156,7 @@ func (s *CrawledPageStore) ListByDomain(ctx context.Context, domainID uuid.UUID,
 		SELECT id, url, url_hash, domain_id, title, '', content_hash,
 		       summary, tags, entities, sentiment, links_out, links_in,
 		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, crawl_count,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
 		       first_seen_at, last_crawled_at, next_crawl_at, created_at
 		FROM crawled_pages
 		WHERE domain_id = $1
@@ -177,7 +178,7 @@ func (s *CrawledPageStore) ListAll(ctx context.Context, limit, offset int) ([]Cr
 		SELECT id, url, url_hash, domain_id, title, '', content_hash,
 		       summary, tags, entities, sentiment, links_out, links_in,
 		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, crawl_count,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
 		       first_seen_at, last_crawled_at, next_crawl_at, created_at
 		FROM crawled_pages
 		ORDER BY last_crawled_at DESC
@@ -198,7 +199,7 @@ func (s *CrawledPageStore) SearchFTS(ctx context.Context, query string, limit in
 		SELECT id, url, url_hash, domain_id, title, '', content_hash,
 		       summary, tags, entities, sentiment, links_out, links_in,
 		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, crawl_count,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
 		       first_seen_at, last_crawled_at, next_crawl_at, created_at
 		FROM crawled_pages
 		WHERE to_tsvector('simple', title || ' ' || clean_text) @@ plainto_tsquery('simple', $1)
@@ -220,7 +221,7 @@ func (s *CrawledPageStore) ListChanged(ctx context.Context, limit int) ([]Crawle
 		SELECT id, url, url_hash, domain_id, title, '', content_hash,
 		       summary, tags, entities, sentiment, links_out, links_in,
 		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, crawl_count,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
 		       first_seen_at, last_crawled_at, next_crawl_at, created_at
 		FROM crawled_pages
 		WHERE changed = true
@@ -242,7 +243,7 @@ func (s *CrawledPageStore) ListUnenriched(ctx context.Context, limit int) ([]Cra
 		SELECT id, url, url_hash, domain_id, title, clean_text, content_hash,
 		       summary, tags, entities, sentiment, links_out, links_in,
 		       depth, status_code, content_type, content_length,
-		       changed, change_summary, enriched, crawl_count,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
 		       first_seen_at, last_crawled_at, next_crawl_at, created_at
 		FROM crawled_pages
 		WHERE enriched = false AND clean_text != ''
@@ -298,6 +299,38 @@ func (s *CrawledPageStore) TotalCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// MarkOpportunityChecked sets the opportunity_checked flag to true for a page.
+func (s *CrawledPageStore) MarkOpportunityChecked(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `UPDATE crawled_pages SET opportunity_checked = true WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("crawled page mark opportunity checked: %w", err)
+	}
+	return nil
+}
+
+// ListUncheckedForOpportunities returns pages with text that haven't been checked for opportunities.
+func (s *CrawledPageStore) ListUncheckedForOpportunities(ctx context.Context, limit int) ([]CrawledPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, url, url_hash, domain_id, title, clean_text, content_hash,
+		       summary, tags, entities, sentiment, links_out, links_in,
+		       depth, status_code, content_type, content_length,
+		       changed, change_summary, enriched, opportunity_checked, crawl_count,
+		       first_seen_at, last_crawled_at, next_crawl_at, created_at
+		FROM crawled_pages
+		WHERE opportunity_checked = false AND length(clean_text) > 100
+		ORDER BY created_at ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("crawled pages list unchecked: %w", err)
+	}
+	defer rows.Close()
+	return scanCrawledPageRows(rows)
+}
+
 func scanCrawledPageRows(rows interface {
 	Next() bool
 	Scan(dest ...any) error
@@ -310,7 +343,7 @@ func scanCrawledPageRows(rows interface {
 			&p.ID, &p.URL, &p.URLHash, &p.DomainID, &p.Title, &p.CleanText, &p.ContentHash,
 			&p.Summary, &p.Tags, &p.Entities, &p.Sentiment, &p.LinksOut, &p.LinksIn,
 			&p.Depth, &p.StatusCode, &p.ContentType, &p.ContentLength,
-			&p.Changed, &p.ChangeSummary, &p.Enriched, &p.CrawlCount,
+			&p.Changed, &p.ChangeSummary, &p.Enriched, &p.OpportunityChecked, &p.CrawlCount,
 			&p.FirstSeenAt, &p.LastCrawledAt, &p.NextCrawlAt, &p.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("crawled page scan: %w", err)

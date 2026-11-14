@@ -145,6 +145,7 @@ func main() {
 		Articles:     articleStore,
 		Sources:      sourceStore,
 		Fingerprints: fingerprintStore,
+		Entities:     entityStore,
 		AI:           aiClient,
 		Scraper:      sc,
 		Storage:      storageClient,
@@ -202,19 +203,14 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	// Login rate limiter: 10 attempts per 15 minutes per IP.
-	loginLimiter := middleware.NewRateLimiter(10, 15*time.Minute)
-
 	// Public routes.
 	r.Get("/api/health", handlers.Health)
-	r.With(middleware.RateLimit(loginLimiter)).Post("/api/login", authHandler.Login)
 	r.Get("/feed/{token}.xml", feedHandler.ServeFeed)
 
-	// Authenticated routes.
+	// All routes auto-authenticated (no login needed).
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.SessionAuth(sessionStore, userStore))
+		r.Use(middleware.AutoAuth(userStore))
 
-		r.Post("/api/logout", authHandler.Logout)
 		r.Get("/api/me", authHandler.Me)
 
 		// Items (articles).
@@ -286,7 +282,9 @@ func main() {
 			r.Put("/{id}", escritosHandler.UpdateEscrito)
 			r.Post("/{id}/regenerate", escritosHandler.RegenerateEscrito)
 			r.Post("/{id}/improve", escritosHandler.ImproveEscrito)
+			r.Post("/{id}/expand", escritosHandler.ExpandEscrito)
 			r.Post("/{id}/seo-score", escritosHandler.RecalcSEO)
+			r.Post("/{id}/seo-optimize", escritosHandler.OptimizeSEO)
 			r.Delete("/{id}", escritosHandler.DeleteEscrito)
 			r.Post("/{id}/export", escritosHandler.ExportEscrito)
 		})

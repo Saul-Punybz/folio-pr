@@ -42,6 +42,7 @@ func (h *AnalyticsHandler) TagTrends(w http.ResponseWriter, r *http.Request) {
 		SELECT t.tag, date_trunc('day', a.created_at)::date as day, count(*) as cnt
 		FROM articles a, jsonb_array_elements_text(a.tags) AS t(tag)
 		WHERE a.created_at >= NOW() - make_interval(days => $1)
+		  AND jsonb_typeof(a.tags) = 'array'
 		GROUP BY t.tag, day
 		ORDER BY day DESC, cnt DESC
 	`, days)
@@ -222,7 +223,10 @@ func (h *AnalyticsHandler) SentimentDistribution(w http.ResponseWriter, r *http.
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"distribution": distribution})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"distribution": distribution,
+		"sentiment":    distribution,
+	})
 }
 
 // SourceHealth handles GET /api/analytics/sources.

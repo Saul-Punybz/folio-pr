@@ -16,6 +16,7 @@ type Article struct {
 	ID                uuid.UUID  `json:"id"`
 	Title             string     `json:"title"`
 	Source            string     `json:"source"`
+	SourceID          *uuid.UUID `json:"source_id,omitempty"`
 	URL               string     `json:"url"`
 	CanonicalURL      string     `json:"canonical_url,omitempty"`
 	Region            string     `json:"region"`
@@ -59,20 +60,41 @@ func (s *ArticleStore) Pool() *pgxpool.Pool {
 }
 
 // ListByStatus returns articles filtered by status with pagination.
-func (s *ArticleStore) ListByStatus(ctx context.Context, status string, limit, offset int) ([]Article, error) {
+// Optional date filters narrow results to a specific time window.
+func (s *ArticleStore) ListByStatus(ctx context.Context, status string, limit, offset int, dateFrom, dateTo *time.Time) ([]Article, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 
-	rows, err := s.pool.Query(ctx, `
+	var args []any
+	args = append(args, status)
+	where := "WHERE status = $1"
+	argN := 2
+
+	if dateFrom != nil {
+		where += fmt.Sprintf(" AND COALESCE(published_at, created_at) >= $%d", argN)
+		args = append(args, *dateFrom)
+		argN++
+	}
+	if dateTo != nil {
+		where += fmt.Sprintf(" AND COALESCE(published_at, created_at) < $%d", argN)
+		args = append(args, *dateTo)
+		argN++
+	}
+
+	args = append(args, limit, offset)
+
+	q := fmt.Sprintf(`
 		SELECT id, title, source, url, canonical_url, region, published_at,
 		       clean_text, summary, image_url, status, pinned, evidence_policy,
 		       evidence_expires_at, tags, created_at
 		FROM articles
-		WHERE status = $1
+		%s
 		ORDER BY pinned DESC, published_at DESC NULLS LAST, created_at DESC
-		LIMIT $2 OFFSET $3
-	`, status, limit, offset)
+		LIMIT $%d OFFSET $%d
+	`, where, argN, argN+1)
+
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("article list: %w", err)
 	}
@@ -177,13 +199,13 @@ func (s *ArticleStore) Create(ctx context.Context, article *Article) error {
 	}
 
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO articles (id, title, source, url, canonical_url, region,
+		INSERT INTO articles (id, title, source, source_id, url, canonical_url, region,
 		                      published_at, clean_text, summary, image_url, status, pinned,
 		                      evidence_policy, evidence_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING created_at
 	`,
-		article.ID, article.Title, article.Source, article.URL,
+		article.ID, article.Title, article.Source, article.SourceID, article.URL,
 		article.CanonicalURL, article.Region, article.PublishedAt,
 		article.CleanText, article.Summary, imageURL, article.Status, article.Pinned,
 		article.EvidencePolicy, article.EvidenceExpiresAt,
@@ -429,6 +451,38 @@ func (s *ArticleStore) ListNeedingEnrichment(ctx context.Context, limit int) ([]
 		a := scanArticleFromRow(rows)
 		if a == nil {
 			return nil, fmt.Errorf("article needing enrichment scan: failed")
+		}
+		articles = append(articles, *a)
+	}
+	return articles, rows.Err()
+}
+
+// ListNeedingReEnrichment returns articles that have clean_text but are missing
+// embeddings or sentiment. Used by the re-enrichment cron job.
+func (s *ArticleStore) ListNeedingReEnrichment(ctx context.Context, limit int) ([]Article, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, title, source, url, canonical_url, region, published_at,
+		       clean_text, summary, image_url, status, pinned, evidence_policy,
+		       evidence_expires_at, tags, created_at
+		FROM articles
+		WHERE clean_text != ''
+		  AND (embedding IS NULL OR sentiment = '' OR sentiment IS NULL)
+		ORDER BY created_at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("article list needing re-enrichment: %w", err)
+	}
+	defer rows.Close()
+
+	var articles []Article
+	for rows.Next() {
+		a := scanArticleFromRow(rows)
+		if a == nil {
+			return nil, fmt.Errorf("article needing re-enrichment scan: failed")
 		}
 		articles = append(articles, *a)
 	}

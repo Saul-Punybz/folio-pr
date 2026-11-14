@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -250,4 +252,285 @@ func persistRelationships(ctx context.Context, deps Deps, triples []Relationship
 func guessEntityType(name string) string {
 	_ = name
 	return "organization"
+}
+
+// ── Opportunity Extraction ─────────────────────────────────────────────
+
+// opportunityKeywords are terms that suggest a page might contain grant/RFP info.
+var opportunityKeywords = []string{
+	"rfp", "request for proposal", "grant", "funding", "solicitud",
+	"convocatoria", "licitacion", "licitación", "subasta", "propuesta",
+	"fellowship", "scholarship", "beca", "fondos", "subvención",
+	"contract", "contrato", "procurement", "adquisición", "subsidio",
+	"request for qualifications", "rfq", "rfi", "request for information",
+	"notice of funding", "nofo", "funding opportunity", "foa",
+}
+
+// shouldCheckOpportunity determines if a page is worth checking for opportunities
+// based on its tags and text content.
+func shouldCheckOpportunity(tags json.RawMessage, text string) bool {
+	// Check tags
+	var tagList []string
+	if err := json.Unmarshal(tags, &tagList); err == nil {
+		for _, t := range tagList {
+			t = strings.ToLower(t)
+			if t == "grants" || t == "federal" || t == "government" {
+				return true
+			}
+		}
+	}
+
+	// Check text for keywords
+	lower := strings.ToLower(text)
+	for _, kw := range opportunityKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseAmountCents tries to extract a numeric cents value from an amount string.
+func parseAmountCents(amount string) int64 {
+	if amount == "" {
+		return 0
+	}
+	// Remove currency symbols and common formatting
+	clean := strings.NewReplacer(
+		"$", "", "€", "", "£", "", ",", "", " ", "",
+		"USD", "", "up to", "", "Up to", "", "UP TO", "",
+	).Replace(amount)
+
+	// Try to find first number
+	var numStr string
+	inNumber := false
+	for _, ch := range clean {
+		if ch >= '0' && ch <= '9' || ch == '.' {
+			numStr += string(ch)
+			inNumber = true
+		} else if inNumber {
+			break
+		}
+	}
+	if numStr == "" {
+		return 0
+	}
+
+	f, err := strconv.ParseFloat(numStr, 64)
+	if err != nil {
+		return 0
+	}
+
+	// Handle multipliers in the original string
+	lower := strings.ToLower(amount)
+	if strings.Contains(lower, "million") || strings.Contains(lower, "millón") || strings.Contains(lower, "m") {
+		// Only apply M multiplier if the number is small (likely abbreviated)
+		if f < 1000 {
+			f *= 1_000_000
+		}
+	} else if strings.Contains(lower, "billion") || strings.Contains(lower, "b") {
+		if f < 1000 {
+			f *= 1_000_000_000
+		}
+	}
+
+	return int64(f * 100)
+}
+
+// computeOpportunityStatus determines the status based on the deadline date.
+func computeOpportunityStatus(deadline *time.Time) string {
+	if deadline == nil {
+		return "unknown"
+	}
+	now := time.Now()
+	if deadline.Before(now) {
+		return "closed"
+	}
+	if deadline.Before(now.AddDate(0, 0, 7)) {
+		return "closing_soon"
+	}
+	return "open"
+}
+
+// deepCleanText applies aggressive text cleaning to remove CSS/JS/nav garbage
+// that leaked through the initial HTML stripping. This is used before sending
+// text to AI for opportunity extraction.
+func deepCleanText(text string) string {
+	lines := strings.Split(text, "\n")
+	var cleaned []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || len(trimmed) < 4 {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+
+		// Skip CSS patterns
+		if strings.Contains(trimmed, "{") || strings.Contains(trimmed, "}") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, ".") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "@") {
+			if !strings.HasPrefix(trimmed, "...") {
+				continue
+			}
+		}
+		if strings.Contains(lower, "!important") || strings.Contains(lower, "rgba(") {
+			continue
+		}
+
+		// Skip JS patterns
+		if strings.HasPrefix(lower, "var ") || strings.HasPrefix(lower, "let ") || strings.HasPrefix(lower, "const ") ||
+			strings.HasPrefix(lower, "function ") || strings.HasPrefix(lower, "ga(") || strings.HasPrefix(lower, "gtag(") ||
+			strings.HasPrefix(lower, "window.") || strings.HasPrefix(lower, "document.") {
+			continue
+		}
+
+		// Skip navigation-like single words
+		if len(trimmed) < 20 && !strings.Contains(trimmed, " ") {
+			// Allow numbers, dates, amounts
+			if !strings.ContainsAny(trimmed, "0123456789$€") {
+				continue
+			}
+		}
+
+		// Skip common boilerplate
+		boilerplate := []string{
+			"skip to", "ir al contenido", "cookie", "search for", "buscar",
+			"formulario de", "toggle", "copyright", "all rights", "powered by",
+			"share this", "compartir", "follow us", "back to top",
+			"accede aquí", "accede aqui", "ver calendario",
+		}
+		skip := false
+		for _, bp := range boilerplate {
+			if strings.HasPrefix(lower, bp) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+
+		cleaned = append(cleaned, trimmed)
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+// ExtractAndStoreOpportunity runs AI extraction on a page and stores the result.
+func ExtractAndStoreOpportunity(ctx context.Context, deps Deps, page *models.CrawledPage) error {
+	if deps.AI == nil || deps.Opportunities == nil {
+		return nil
+	}
+
+	text := deepCleanText(page.CleanText)
+	if len(text) > 6000 {
+		text = text[:6000]
+	}
+
+	// Check if worth analyzing
+	if !shouldCheckOpportunity(page.Tags, text) {
+		_ = deps.Pages.MarkOpportunityChecked(ctx, page.ID)
+		return nil
+	}
+
+	extracted, err := deps.AI.ExtractOpportunity(ctx, text)
+	if err != nil {
+		slog.Warn("crawler/opportunity: extract", "id", page.ID, "err", err)
+		_ = deps.Pages.MarkOpportunityChecked(ctx, page.ID)
+		return err
+	}
+
+	_ = deps.Pages.MarkOpportunityChecked(ctx, page.ID)
+
+	if !extracted.IsOpportunity || extracted.Confidence < 30 {
+		return nil
+	}
+
+	// Parse deadline
+	var deadline *time.Time
+	if extracted.Deadline != "" {
+		if t, parseErr := time.Parse("2006-01-02", extracted.Deadline); parseErr == nil {
+			deadline = &t
+		}
+	}
+
+	// Validate category
+	validCategories := map[string]bool{
+		"rfp": true, "grant": true, "funding": true, "proposal": true,
+		"contract": true, "fellowship": true, "scholarship": true, "other": true,
+	}
+	cat := strings.ToLower(extracted.Category)
+	if !validCategories[cat] {
+		cat = "other"
+	}
+
+	rawJSON, _ := json.Marshal(extracted)
+
+	opp := &models.Opportunity{
+		PageID:        &page.ID,
+		DomainID:      page.DomainID,
+		Title:         extracted.Title,
+		Agency:        extracted.Agency,
+		Summary:       extracted.Summary,
+		Amount:        extracted.Amount,
+		AmountCents:   parseAmountCents(extracted.Amount),
+		Deadline:      deadline,
+		ContactName:   extracted.ContactName,
+		ContactEmail:  extracted.ContactEmail,
+		Category:      cat,
+		Status:        computeOpportunityStatus(deadline),
+		SourceURL:     page.URL,
+		Confidence:    extracted.Confidence,
+		RawExtraction: rawJSON,
+	}
+
+	if err := deps.Opportunities.Upsert(ctx, opp); err != nil {
+		return fmt.Errorf("opportunity store: %w", err)
+	}
+
+	slog.Info("crawler/opportunity: extracted",
+		"page_id", page.ID,
+		"title", opp.Title,
+		"category", opp.Category,
+		"confidence", opp.Confidence,
+	)
+	return nil
+}
+
+// RunOpportunityExtraction batch-processes enriched pages that haven't been
+// checked for opportunities yet.
+func RunOpportunityExtraction(ctx context.Context, deps Deps, batchSize int) {
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+	if deps.Opportunities == nil {
+		return
+	}
+
+	slog.Info("crawler/opportunity: starting extraction", "batch_size", batchSize)
+
+	pages, err := deps.Pages.ListUncheckedForOpportunities(ctx, batchSize)
+	if err != nil {
+		slog.Error("crawler/opportunity: list unchecked", "err", err)
+		return
+	}
+
+	if len(pages) == 0 {
+		slog.Debug("crawler/opportunity: no pages to check")
+		return
+	}
+
+	extracted := 0
+	for i := range pages {
+		if ctx.Err() != nil {
+			break
+		}
+		if err := ExtractAndStoreOpportunity(ctx, deps, &pages[i]); err != nil {
+			slog.Warn("crawler/opportunity: extract page", "id", pages[i].ID, "err", err)
+			continue
+		}
+		extracted++
+	}
+
+	slog.Info("crawler/opportunity: extraction complete", "checked", extracted, "total", len(pages))
 }

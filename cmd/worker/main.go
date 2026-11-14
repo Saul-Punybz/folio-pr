@@ -252,6 +252,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Re-enrichment: every hour — process articles missing embeddings/sentiment.
+	_, err = c.AddFunc("30 * * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+
+		jobCtx, jobCancel := context.WithTimeout(ctx, 1*time.Hour)
+		defer jobCancel()
+
+		slog.Info("cron: re-enrichment job triggered")
+		scraper.RunReEnrichment(jobCtx, stores, aiClient, storageClient, 50)
+	})
+	if err != nil {
+		slog.Error("worker: add re-enrichment cron", "err", err)
+		os.Exit(1)
+	}
+
 	// Crawler: every 2 hours — fetch from queue, extract links, detect changes.
 	crawlerDeps := crawler.Deps{
 		Domains:  crawlDomainStore,

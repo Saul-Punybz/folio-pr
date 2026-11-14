@@ -15,6 +15,10 @@ type Escrito struct {
 	ID              uuid.UUID       `json:"id"`
 	UserID          uuid.UUID       `json:"user_id"`
 	Topic           string          `json:"topic"`
+	OutputFormat    string          `json:"output_format"`
+	WritingStyle    string          `json:"writing_style"`
+	TargetAudience  string          `json:"target_audience"`
+	CitationStyle   string          `json:"citation_style"`
 	Slug            string          `json:"slug"`
 	Title           string          `json:"title"`
 	MetaDescription string          `json:"meta_description"`
@@ -34,14 +38,19 @@ type Escrito struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
-// EscritoSource links an escrito to a source article.
+// EscritoSource links an escrito to a source article or a web-researched page.
+// When ArticleID is non-nil, it references a local article.
+// When ArticleID is nil, Web* fields hold the web source metadata.
 type EscritoSource struct {
-	ID            uuid.UUID `json:"id"`
-	EscritoID     uuid.UUID `json:"escrito_id"`
-	ArticleID     uuid.UUID `json:"article_id"`
-	Relevance     float32   `json:"relevance"`
-	UsedInSection string    `json:"used_in_section"`
-	// Joined fields from articles table.
+	ID            uuid.UUID  `json:"id"`
+	EscritoID     uuid.UUID  `json:"escrito_id"`
+	ArticleID     *uuid.UUID `json:"article_id,omitempty"`
+	Relevance     float32    `json:"relevance"`
+	UsedInSection string     `json:"used_in_section"`
+	WebURL        string     `json:"web_url,omitempty"`
+	WebTitle      string     `json:"web_title,omitempty"`
+	WebDomain     string     `json:"web_domain,omitempty"`
+	// Resolved display fields (from JOIN or from Web* fields).
 	ArticleTitle  string `json:"article_title,omitempty"`
 	ArticleSource string `json:"article_source,omitempty"`
 	ArticleURL    string `json:"article_url,omitempty"`
@@ -71,12 +80,16 @@ func (s *EscritoStore) Create(ctx context.Context, e *Escrito) error {
 	}
 
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO escritos (id, user_id, topic, keywords, hashtags)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING slug, title, meta_description, content, article_plan, seo_score,
+		INSERT INTO escritos (
+			id, user_id, topic, output_format, writing_style, target_audience, citation_style, keywords, hashtags
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING output_format, writing_style, target_audience, citation_style,
+		          slug, title, meta_description, content, article_plan, seo_score,
 		          status, phase, progress, publish_status, word_count,
 		          started_at, finished_at, created_at, updated_at
-	`, e.ID, e.UserID, e.Topic, kwJSON, htJSON).Scan(
+	`, e.ID, e.UserID, e.Topic, e.OutputFormat, e.WritingStyle, e.TargetAudience, e.CitationStyle, kwJSON, htJSON).Scan(
+		&e.OutputFormat, &e.WritingStyle, &e.TargetAudience, &e.CitationStyle,
 		&e.Slug, &e.Title, &e.MetaDescription, &e.Content, &e.ArticlePlan, &e.SEOScore,
 		&e.Status, &e.Phase, &e.Progress, &e.PublishStatus, &e.WordCount,
 		&e.StartedAt, &e.FinishedAt, &e.CreatedAt, &e.UpdatedAt,
@@ -91,13 +104,15 @@ func (s *EscritoStore) GetByID(ctx context.Context, id uuid.UUID) (*Escrito, err
 	var e Escrito
 	var kwRaw, htRaw []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, user_id, topic, slug, title, meta_description, keywords, hashtags,
+		SELECT id, user_id, topic, output_format, writing_style, target_audience, citation_style,
+		       slug, title, meta_description, keywords, hashtags,
 		       content, article_plan, seo_score, status, phase, progress,
 		       publish_status, word_count, started_at, finished_at, created_at, updated_at
 		FROM escritos
 		WHERE id = $1
 	`, id).Scan(
-		&e.ID, &e.UserID, &e.Topic, &e.Slug, &e.Title, &e.MetaDescription,
+		&e.ID, &e.UserID, &e.Topic, &e.OutputFormat, &e.WritingStyle, &e.TargetAudience, &e.CitationStyle,
+		&e.Slug, &e.Title, &e.MetaDescription,
 		&kwRaw, &htRaw, &e.Content, &e.ArticlePlan, &e.SEOScore,
 		&e.Status, &e.Phase, &e.Progress, &e.PublishStatus, &e.WordCount,
 		&e.StartedAt, &e.FinishedAt, &e.CreatedAt, &e.UpdatedAt,
@@ -112,7 +127,8 @@ func (s *EscritoStore) GetByID(ctx context.Context, id uuid.UUID) (*Escrito, err
 
 func (s *EscritoStore) ListByUser(ctx context.Context, userID uuid.UUID) ([]Escrito, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, user_id, topic, slug, title, meta_description, keywords, hashtags,
+		SELECT id, user_id, topic, output_format, writing_style, target_audience, citation_style,
+		       slug, title, meta_description, keywords, hashtags,
 		       content, article_plan, seo_score, status, phase, progress,
 		       publish_status, word_count, started_at, finished_at, created_at, updated_at
 		FROM escritos
@@ -129,7 +145,8 @@ func (s *EscritoStore) ListByUser(ctx context.Context, userID uuid.UUID) ([]Escr
 		var e Escrito
 		var kwRaw, htRaw []byte
 		if err := rows.Scan(
-			&e.ID, &e.UserID, &e.Topic, &e.Slug, &e.Title, &e.MetaDescription,
+			&e.ID, &e.UserID, &e.Topic, &e.OutputFormat, &e.WritingStyle, &e.TargetAudience, &e.CitationStyle,
+			&e.Slug, &e.Title, &e.MetaDescription,
 			&kwRaw, &htRaw, &e.Content, &e.ArticlePlan, &e.SEOScore,
 			&e.Status, &e.Phase, &e.Progress, &e.PublishStatus, &e.WordCount,
 			&e.StartedAt, &e.FinishedAt, &e.CreatedAt, &e.UpdatedAt,
@@ -145,7 +162,8 @@ func (s *EscritoStore) ListByUser(ctx context.Context, userID uuid.UUID) ([]Escr
 
 func (s *EscritoStore) ListQueued(ctx context.Context) ([]Escrito, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, user_id, topic, slug, title, meta_description, keywords, hashtags,
+		SELECT id, user_id, topic, output_format, writing_style, target_audience, citation_style,
+		       slug, title, meta_description, keywords, hashtags,
 		       content, article_plan, seo_score, status, phase, progress,
 		       publish_status, word_count, started_at, finished_at, created_at, updated_at
 		FROM escritos
@@ -163,7 +181,8 @@ func (s *EscritoStore) ListQueued(ctx context.Context) ([]Escrito, error) {
 		var e Escrito
 		var kwRaw, htRaw []byte
 		if err := rows.Scan(
-			&e.ID, &e.UserID, &e.Topic, &e.Slug, &e.Title, &e.MetaDescription,
+			&e.ID, &e.UserID, &e.Topic, &e.OutputFormat, &e.WritingStyle, &e.TargetAudience, &e.CitationStyle,
+			&e.Slug, &e.Title, &e.MetaDescription,
 			&kwRaw, &htRaw, &e.Content, &e.ArticlePlan, &e.SEOScore,
 			&e.Status, &e.Phase, &e.Progress, &e.PublishStatus, &e.WordCount,
 			&e.StartedAt, &e.FinishedAt, &e.CreatedAt, &e.UpdatedAt,
@@ -175,6 +194,18 @@ func (s *EscritoStore) ListQueued(ctx context.Context) ([]Escrito, error) {
 		escritos = append(escritos, e)
 	}
 	return escritos, rows.Err()
+}
+
+func (s *EscritoStore) UpdateProfile(ctx context.Context, id uuid.UUID, outputFormat, writingStyle, targetAudience, citationStyle string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE escritos
+		SET output_format = $2, writing_style = $3, target_audience = $4, citation_style = $5, updated_at = NOW()
+		WHERE id = $1
+	`, id, outputFormat, writingStyle, targetAudience, citationStyle)
+	if err != nil {
+		return fmt.Errorf("escrito update profile: %w", err)
+	}
+	return nil
 }
 
 func (s *EscritoStore) UpdateContent(ctx context.Context, id uuid.UUID, title, slug, metaDesc, content string, keywords, hashtags []string, wordCount int, plan json.RawMessage) error {
@@ -189,7 +220,8 @@ func (s *EscritoStore) UpdateContent(ctx context.Context, id uuid.UUID, title, s
 	_, err = s.pool.Exec(ctx, `
 		UPDATE escritos
 		SET title = $2, slug = $3, meta_description = $4, content = $5,
-		    keywords = $6, hashtags = $7, word_count = $8, article_plan = $9,
+		    keywords = $6, hashtags = $7, word_count = $8,
+		    article_plan = COALESCE($9, article_plan),
 		    updated_at = NOW()
 		WHERE id = $1
 	`, id, title, slug, metaDesc, content, kwJSON, htJSON, wordCount, plan)
@@ -334,10 +366,10 @@ func (s *EscritoSourceStore) Create(ctx context.Context, src *EscritoSource) err
 		src.ID = uuid.New()
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO escrito_sources (id, escrito_id, article_id, relevance, used_in_section)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (escrito_id, article_id) DO NOTHING
-	`, src.ID, src.EscritoID, src.ArticleID, src.Relevance, src.UsedInSection)
+		INSERT INTO escrito_sources (id, escrito_id, article_id, relevance, used_in_section, web_url, web_title, web_domain)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (escrito_id, article_id) WHERE article_id IS NOT NULL DO UPDATE SET relevance = EXCLUDED.relevance
+	`, src.ID, src.EscritoID, src.ArticleID, src.Relevance, src.UsedInSection, src.WebURL, src.WebTitle, src.WebDomain)
 	if err != nil {
 		return fmt.Errorf("escrito source create: %w", err)
 	}
@@ -347,9 +379,10 @@ func (s *EscritoSourceStore) Create(ctx context.Context, src *EscritoSource) err
 func (s *EscritoSourceStore) ListByEscrito(ctx context.Context, escritoID uuid.UUID) ([]EscritoSource, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT es.id, es.escrito_id, es.article_id, es.relevance, es.used_in_section,
-		       a.title, a.source, a.url
+		       es.web_url, es.web_title, es.web_domain,
+		       COALESCE(a.title, ''), COALESCE(a.source, ''), COALESCE(a.url, '')
 		FROM escrito_sources es
-		JOIN articles a ON a.id = es.article_id
+		LEFT JOIN articles a ON a.id = es.article_id
 		WHERE es.escrito_id = $1
 		ORDER BY es.relevance DESC
 	`, escritoID)
@@ -363,9 +396,16 @@ func (s *EscritoSourceStore) ListByEscrito(ctx context.Context, escritoID uuid.U
 		var src EscritoSource
 		if err := rows.Scan(
 			&src.ID, &src.EscritoID, &src.ArticleID, &src.Relevance, &src.UsedInSection,
+			&src.WebURL, &src.WebTitle, &src.WebDomain,
 			&src.ArticleTitle, &src.ArticleSource, &src.ArticleURL,
 		); err != nil {
 			return nil, fmt.Errorf("escrito source scan: %w", err)
+		}
+		// For web sources, populate display fields from web_* columns
+		if src.ArticleID == nil {
+			src.ArticleTitle = src.WebTitle
+			src.ArticleSource = src.WebDomain
+			src.ArticleURL = src.WebURL
 		}
 		sources = append(sources, src)
 	}

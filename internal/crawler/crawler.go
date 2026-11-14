@@ -16,15 +16,16 @@ import (
 
 // Deps groups all dependencies needed by the crawler engine.
 type Deps struct {
-	Domains  *models.CrawlDomainStore
-	Queue    *models.CrawlQueueStore
-	Pages    *models.CrawledPageStore
-	Links    *models.CrawlLinkStore
-	Runs     *models.CrawlRunStore
-	Entities *models.EntityStore
-	PageEnts *models.PageEntityStore
-	Rels     *models.EntityRelationshipStore
-	AI       *ai.OllamaClient
+	Domains       *models.CrawlDomainStore
+	Queue         *models.CrawlQueueStore
+	Pages         *models.CrawledPageStore
+	Links         *models.CrawlLinkStore
+	Runs          *models.CrawlRunStore
+	Entities      *models.EntityStore
+	PageEnts      *models.PageEntityStore
+	Rels          *models.EntityRelationshipStore
+	Opportunities *models.OpportunityStore
+	AI            *ai.OllamaClient
 }
 
 const (

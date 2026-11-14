@@ -46,22 +46,21 @@ func DataDirectory() string {
 }
 
 // FindPGBinDir locates the PostgreSQL binaries.
-// It checks: 1) .app bundle Resources/pg/bin, 2) Homebrew, 3) PATH
+// It checks: 1) the running .app bundle, 2) Homebrew, 3) PATH.
 func FindPGBinDir() (string, string, error) {
-	// Check if running inside a .app bundle
-	exe, _ := os.Executable()
-	macosDir := filepath.Dir(exe)
-	contentsDir := filepath.Dir(macosDir)
-	if filepath.Base(contentsDir) == "Contents" {
-		appPG := filepath.Join(contentsDir, "Resources", "pg")
-		binDir := filepath.Join(appPG, "bin")
-		libDir := filepath.Join(appPG, "lib")
-		if _, err := os.Stat(filepath.Join(binDir, "pg_ctl")); err == nil {
+	// Prefer the bundled PostgreSQL when running from Folio.app so the app
+	// remains self-contained on machines without Homebrew.
+	if exePath, err := os.Executable(); err == nil {
+		resourcesDir := filepath.Clean(filepath.Join(filepath.Dir(exePath), "..", "Resources"))
+		bundleRoot := filepath.Join(resourcesDir, "pg")
+		binDir := filepath.Join(bundleRoot, "bin")
+		libDir := filepath.Join(bundleRoot, "lib")
+		if _, statErr := os.Stat(filepath.Join(binDir, "pg_ctl")); statErr == nil {
 			return binDir, libDir, nil
 		}
 	}
 
-	// Check Homebrew
+	// Check Homebrew next for local developer builds outside the app bundle.
 	for _, ver := range []string{"17", "16", "15"} {
 		prefix := fmt.Sprintf("/opt/homebrew/opt/postgresql@%s", ver)
 		binDir := filepath.Join(prefix, "bin")

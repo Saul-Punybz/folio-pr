@@ -41,8 +41,9 @@ echo "  ✓ Frontend built"
 # ── Step 2: Build Go Binary ──────────────────────────────────
 echo ""
 echo "▸ Step 2/5: Building Go binary (arm64)..."
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build \
+CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build \
     -ldflags="-s -w" \
+    -tags "desktop,production" \
     -o "$MACOS/Folio" \
     ./cmd/app
 echo "  ✓ Binary built ($(du -h "$MACOS/Folio" | awk '{print $1}'))"
@@ -85,6 +86,14 @@ cp "$PG_PREFIX/lib/"*.dylib "$PG_BUNDLE/lib/" 2>/dev/null || true
 if [ -d "$PG_PREFIX/lib/postgresql" ]; then
     cp -R "$PG_PREFIX/lib/postgresql" "$PG_BUNDLE/lib/"
 fi
+
+# Copy ICU data dylibs. PostgreSQL's ICU libs reference these via @loader_path,
+# so they won't appear in the absolute-path dependency scan below.
+for icu_lib in /opt/homebrew/opt/icu4c@*/lib/libicudata*.dylib /usr/local/opt/icu4c@*/lib/libicudata*.dylib; do
+    if [ -f "$icu_lib" ]; then
+        cp -L "$icu_lib" "$PG_BUNDLE/lib/" 2>/dev/null || true
+    fi
+done
 
 # Copy PG share data (needed by initdb)
 PG_SHARE=""
@@ -131,27 +140,40 @@ echo "▸ Step 4/5: Fixing library paths..."
 # Collect all Homebrew dependencies
 collect_deps() {
     local binary="$1"
-    otool -L "$binary" 2>/dev/null | grep -o '/opt/homebrew[^ ]*\|/usr/local[^ ]*' | grep '\.dylib' || true
+    otool -L "$binary" 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -E '^(/opt/homebrew|/usr/local).+\.dylib$' || true
 }
 
 # Copy all dependency dylibs and fix references
 fix_binary() {
     local binary="$1"
     local lib_dest="$PG_BUNDLE/lib"
+    local loader_ref="@loader_path/../lib"
+
+    if [ "$(dirname "$binary")" = "$lib_dest" ]; then
+        loader_ref="@loader_path"
+    fi
 
     for dep in $(collect_deps "$binary"); do
         local dep_name=$(basename "$dep")
-        if [ ! -f "$lib_dest/$dep_name" ]; then
-            cp "$dep" "$lib_dest/$dep_name" 2>/dev/null || true
-            chmod 755 "$lib_dest/$dep_name" 2>/dev/null || true
+        local dep_target="$lib_dest/$dep_name"
+        local dep_ref="$loader_ref/$dep_name"
+        if [ ! -f "$dep_target" ]; then
+            cp -L "$dep" "$dep_target" 2>/dev/null || true
+            chmod 755 "$dep_target" 2>/dev/null || true
+            install_name_tool -id "@loader_path/$dep_name" "$dep_target" 2>/dev/null || true
+            # Rewrite the parent reference before recursing so nested calls can't
+            # contaminate the current dependency target via bash's dynamic scope.
+            install_name_tool -change "$dep" "$dep_ref" "$binary" 2>/dev/null || true
             # Recursively fix this library's deps too
-            fix_binary "$lib_dest/$dep_name"
+            fix_binary "$dep_target"
+            continue
         fi
-        install_name_tool -change "$dep" "@executable_path/../Resources/pg/lib/$dep_name" "$binary" 2>/dev/null || true
+        # Use @loader_path so PG binaries resolve libs relative to themselves
+        install_name_tool -change "$dep" "$dep_ref" "$binary" 2>/dev/null || true
     done
 
     # Set the rpath
-    install_name_tool -add_rpath "@executable_path/../Resources/pg/lib" "$binary" 2>/dev/null || true
+    install_name_tool -add_rpath "@loader_path/../lib" "$binary" 2>/dev/null || true
 }
 
 # Fix all PG binaries
@@ -170,6 +192,16 @@ for lib in "$PG_BUNDLE"/lib/postgresql/*.dylib "$PG_BUNDLE"/lib/postgresql/*.so;
 done
 
 echo "  ✓ Library paths fixed"
+
+# Ad-hoc codesign all bundled binaries and libraries
+echo "  Signing bundled binaries..."
+for bin in "$PG_BUNDLE"/bin/*; do
+    codesign --force -s - "$bin" 2>/dev/null || true
+done
+for lib in "$PG_BUNDLE"/lib/*.dylib "$PG_BUNDLE"/lib/postgresql/*.dylib; do
+    [ -f "$lib" ] && codesign --force -s - "$lib" 2>/dev/null || true
+done
+echo "  ✓ Binaries signed"
 
 # ── Step 5: Create .app Bundle Metadata ──────────────────────
 echo ""
@@ -215,31 +247,13 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
-# Create a simple app icon (blue circle with F)
-# For production, replace with proper .icns file
-if command -v sips &>/dev/null; then
-    # Create a 512x512 icon using Python
-    python3 -c "
-from PIL import Image, ImageDraw, ImageFont
-import sys
-
-try:
-    img = Image.new('RGBA', (512, 512), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    # Draw rounded rectangle background
-    draw.rounded_rectangle([20, 20, 492, 492], radius=80, fill=(88, 80, 236))
-    # Draw letter F
-    try:
-        font = ImageFont.truetype('/System/Library/Fonts/SFCompact.ttf', 280)
-    except:
-        font = ImageFont.load_default()
-    draw.text((256, 240), 'F', fill='white', font=font, anchor='mm')
-    img.save('$RESOURCES/icon.png')
-    print('Icon created')
-except ImportError:
-    # No PIL, create a placeholder
-    sys.exit(1)
-" 2>/dev/null || echo "  (Pillow not installed, skipping icon generation)"
+# Copy app icon
+ICON_SRC="$SCRIPT_DIR/AppIcon.icns"
+if [ -f "$ICON_SRC" ]; then
+    cp "$ICON_SRC" "$RESOURCES/AppIcon.icns"
+    echo "  ✓ App icon copied"
+else
+    echo "  (No AppIcon.icns found, skipping)"
 fi
 
 # ── Create DMG ───────────────────────────────────────────────
@@ -247,12 +261,21 @@ echo ""
 echo "▸ Creating DMG..."
 
 DMG_PATH="$BUILD_DIR/Folio.dmg"
-hdiutil create \
-    -volname "Folio" \
-    -srcfolder "$APP_DIR" \
-    -ov \
-    -format UDZO \
-    "$DMG_PATH" 2>/dev/null
+DMG_CREATED=0
+if command -v hdiutil >/dev/null 2>&1; then
+    if hdiutil create \
+        -volname "Folio" \
+        -srcfolder "$APP_DIR" \
+        -ov \
+        -format UDZO \
+        "$DMG_PATH" 2>/dev/null; then
+        DMG_CREATED=1
+    else
+        echo "  ! DMG creation failed; app bundle is still ready at $APP_DIR"
+    fi
+else
+    echo "  ! hdiutil not available; skipping DMG creation"
+fi
 
 echo ""
 echo "╔══════════════════════════════════════╗"
@@ -260,9 +283,15 @@ echo "║            Build Complete!           ║"
 echo "╚══════════════════════════════════════╝"
 echo ""
 echo "  App:  $APP_DIR"
-echo "  DMG:  $DMG_PATH"
+if [ "$DMG_CREATED" -eq 1 ]; then
+    echo "  DMG:  $DMG_PATH"
+else
+    echo "  DMG:  skipped"
+fi
 echo "  Size: $(du -sh "$APP_DIR" | awk '{print $1}')"
 echo ""
 echo "  To test: open \"$APP_DIR\""
-echo "  To distribute: share $DMG_PATH"
+if [ "$DMG_CREATED" -eq 1 ]; then
+    echo "  To distribute: share $DMG_PATH"
+fi
 echo ""

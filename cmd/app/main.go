@@ -1,22 +1,19 @@
 // Command app is the self-contained macOS Folio application.
-// It starts an embedded PostgreSQL, runs migrations, serves the API + frontend,
-// and runs background worker cron jobs — all in one process.
+// It starts an embedded PostgreSQL, runs migrations, serves the API + frontend
+// in a native Wails window, and runs background worker cron jobs — all in one process.
 package main
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,6 +21,10 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/robfig/cron/v3"
+	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 
 	folio "github.com/Saul-Punybz/folio"
 	"github.com/Saul-Punybz/folio/internal/agents"
@@ -40,6 +41,75 @@ import (
 	"github.com/Saul-Punybz/folio/internal/scraper"
 	"github.com/Saul-Punybz/folio/internal/storage"
 )
+
+// splashHTML is the branded loading screen shown when the app starts.
+const splashHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Folio</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+  display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;
+  background:radial-gradient(ellipse at 50% 40%,#1a1530 0%,#0a0a0f 70%)}
+.splash{text-align:center;animation:fadeIn .6s ease}
+.logo{width:80px;height:80px;margin:0 auto 24px;position:relative}
+.logo svg{width:80px;height:80px;filter:drop-shadow(0 0 30px rgba(99,102,241,.4))}
+.logo::after{content:'';position:absolute;inset:-10px;border-radius:20px;
+  background:radial-gradient(circle,rgba(99,102,241,.15) 0%,transparent 70%);
+  animation:pulse 2s ease-in-out infinite}
+h1{font-size:32px;font-weight:700;letter-spacing:-.5px;margin-bottom:8px;
+  background:linear-gradient(135deg,#c4b5fd 0%,#818cf8 50%,#6366f1 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.subtitle{font-size:13px;color:#71717a;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:40px}
+.loader{display:flex;gap:6px;justify-content:center;margin-bottom:32px}
+.loader span{width:6px;height:6px;border-radius:50%;background:#6366f1;
+  animation:bounce .8s ease-in-out infinite}
+.loader span:nth-child(2){animation-delay:.15s}
+.loader span:nth-child(3){animation-delay:.3s}
+.status{font-size:12px;color:#52525b;transition:opacity .3s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes pulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+@keyframes bounce{0%,100%{transform:translateY(0);opacity:.4}50%{transform:translateY(-8px);opacity:1}}
+@keyframes fadeOut{to{opacity:0;transform:scale(1.02)}}
+</style>
+</head>
+<body>
+<div class="splash" id="splash">
+  <div class="logo">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="6" fill="#6366f1"/>
+      <text x="16" y="22" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="white" text-anchor="middle">F</text>
+    </svg>
+  </div>
+  <h1>Folio</h1>
+  <p class="subtitle">Political Intelligence</p>
+  <div class="loader"><span></span><span></span><span></span></div>
+  <p class="status" id="status">Connecting...</p>
+</div>
+<script>
+(function(){
+  var status=document.getElementById('status');
+  var msgs=['Connecting...','Loading sources...','Preparing inbox...'];
+  var i=0;
+  var iv=setInterval(function(){i++;if(i<msgs.length)status.textContent=msgs[i]},600);
+  function go(){
+    clearInterval(iv);
+    status.textContent='Ready';
+    document.getElementById('splash').style.animation='fadeOut .4s ease forwards';
+    setTimeout(function(){window.location.replace('/inbox')},400);
+  }
+  // Check API health then navigate
+  function check(){
+    fetch('/api/health').then(function(r){if(r.ok)go();else setTimeout(check,300)}).catch(function(){setTimeout(check,300)});
+  }
+  setTimeout(check,400);
+})();
+</script>
+</body>
+</html>`
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -152,6 +222,7 @@ func main() {
 	entityRelStore := models.NewEntityRelationshipStore(pool)
 	escritoStore := models.NewEscritoStore(pool)
 	escritoSourceStore := models.NewEscritoSourceStore(pool)
+	opportunityStore := models.NewOpportunityStore(pool)
 
 	// S3 storage (optional).
 	storageCtx, storageCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -165,7 +236,7 @@ func main() {
 	// AI client — supports both Ollama (local) and OpenAI-compatible APIs (cloud).
 	aiClient := ai.NewFromConfig(cfg.AI.Provider, cfg.AI.Host, cfg.AI.APIKey, cfg.AI.InstructModel, cfg.AI.EmbedModel)
 
-	// ── Setup Router (same as cmd/api) ───────────────────────────
+	// ── Setup Router ─────────────────────────────────────────────
 	r := setupRouter(
 		cfg, aiClient, storageClient,
 		articleStore, userStore, sessionStore, sourceStore, noteStore,
@@ -173,95 +244,115 @@ func main() {
 		chatSessionStore, researchProjectStore, researchFindingStore,
 		entityStore, crawlDomainStore, crawlQueueStore, crawledPageStore,
 		crawlLinkStore, crawlRunStore, pageEntityStore, entityRelStore,
-		escritoStore, escritoSourceStore, pool,
+		escritoStore, escritoSourceStore, opportunityStore, pool,
 	)
-
-	// ── Serve Embedded Frontend ──────────────────────────────────
-	frontendFS, _ := fs.Sub(folio.FrontendDist, "frontend/dist")
-	fileServer := http.FileServer(http.FS(frontendFS))
-	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-		if strings.HasPrefix(req.URL.Path, "/api") {
-			http.NotFound(w, req)
-			return
-		}
-		// Try exact file first, fall back to index.html for SPA routing
-		f, err := frontendFS.Open(strings.TrimPrefix(req.URL.Path, "/"))
-		if err != nil {
-			// Serve index.html for SPA client-side routing
-			req.URL.Path = "/"
-		} else {
-			f.Close()
-		}
-		fileServer.ServeHTTP(w, req)
-	})
 
 	// ── Start Worker Cron Jobs (inline) ──────────────────────────
 	var wg sync.WaitGroup
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 
-	c := startWorkerCron(workerCtx, &wg, cfg, aiClient, storageClient,
+	cronScheduler := startWorkerCron(workerCtx, &wg, cfg, aiClient, storageClient,
 		articleStore, sourceStore, fingerprintStore, sessionStore,
 		briefStore, watchlistOrgStore, watchlistHitStore, entityStore,
 		researchProjectStore, researchFindingStore, crawlDomainStore,
 		crawlQueueStore, crawledPageStore, crawlLinkStore, crawlRunStore,
 		pageEntityStore, entityRelStore, escritoStore, escritoSourceStore,
+		opportunityStore,
 	)
 
-	// ── Start HTTP Server ────────────────────────────────────────
-	addr := ":8080"
-	if p := os.Getenv("SERVER_PORT"); p != "" {
-		addr = p
+	// ── Embedded Frontend Assets ─────────────────────────────────
+	frontendFS, _ := fs.Sub(folio.FrontendDist, "frontend/dist")
+	fileServer := http.FileServer(http.FS(frontendFS))
+
+	// ── Launch Wails Native Window ───────────────────────────────
+	slog.Info("Folio is ready — opening native window")
+
+	if err := wails.Run(&options.App{
+		Title:     "Folio",
+		Width:     1400,
+		Height:    900,
+		MinWidth:  1024,
+		MinHeight: 700,
+		AssetServer: &assetserver.Options{
+			// Handler serves all requests: API routes go to Chi, frontend
+			// routes resolve Astro's directory/index.html convention.
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				path := req.URL.Path
+
+				// API and feed routes → Chi router
+				if strings.HasPrefix(path, "/api/") ||
+					strings.HasPrefix(path, "/api") ||
+					strings.HasPrefix(path, "/feed/") {
+					r.ServeHTTP(w, req)
+					return
+				}
+
+				// Normalize path
+				trimmed := strings.TrimPrefix(path, "/")
+				trimmed = strings.TrimSuffix(trimmed, "/")
+
+				// Root → serve branded splash screen
+				if trimmed == "" {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Write([]byte(splashHTML))
+					return
+				}
+
+				// Try exact file (static assets: /_astro/foo.js, /favicon.svg)
+				if f, err := frontendFS.Open(trimmed); err == nil {
+					info, statErr := f.Stat()
+					f.Close()
+					if statErr == nil && !info.IsDir() {
+						fileServer.ServeHTTP(w, req)
+						return
+					}
+				}
+
+				// Try directory index (Astro pages: /inbox → inbox/index.html)
+				indexPath := trimmed + "/index.html"
+				if f, err := frontendFS.Open(indexPath); err == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					io.Copy(w, f)
+					f.Close()
+					return
+				}
+
+				// Fallback: serve root index.html
+				req.URL.Path = "/index.html"
+				fileServer.ServeHTTP(w, req)
+			}),
+		},
+		OnShutdown: func(ctx context.Context) {
+			slog.Info("shutting down Folio...")
+
+			// Stop cron
+			cronCtx := cronScheduler.Stop()
+			workerCancel()
+
+			// Wait for cron + goroutines
+			select {
+			case <-cronCtx.Done():
+			case <-time.After(15 * time.Second):
+			}
+			wg.Wait()
+
+			pool.Close()
+			pg.Stop()
+
+			slog.Info("Folio stopped. Goodbye!")
+		},
+		Mac: &mac.Options{
+			TitleBar: mac.TitleBarDefault(),
+			About: &mac.AboutInfo{
+				Title:   "Folio",
+				Message: "Political Intelligence & Evidence Archive\nVersion 1.0.0\n\nCopyright © 2026 Puny.bz",
+			},
+		},
+	}); err != nil {
+		slog.Error("wails app error", "err", err)
+		os.Exit(1)
 	}
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		slog.Info("Folio is ready!", "url", fmt.Sprintf("http://localhost%s", addr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "err", err)
-			os.Exit(1)
-		}
-	}()
-
-	// Open browser after a short delay
-	go func() {
-		time.Sleep(800 * time.Millisecond)
-		openBrowser(fmt.Sprintf("http://localhost%s", addr))
-	}()
-
-	// ── Wait for Shutdown ────────────────────────────────────────
-	<-done
-	slog.Info("shutting down Folio...")
-
-	// Stop cron
-	cronCtx := c.Stop()
-	workerCancel()
-
-	// Shutdown HTTP server
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-	srv.Shutdown(shutdownCtx)
-
-	// Wait for cron + goroutines
-	select {
-	case <-cronCtx.Done():
-	case <-time.After(15 * time.Second):
-	}
-	wg.Wait()
-
-	pool.Close()
-	pg.Stop()
-
-	slog.Info("Folio stopped. Goodbye!")
 }
 
 // setupRouter creates the Chi router with all API routes.
@@ -291,6 +382,7 @@ func setupRouter(
 	entityRelStore *models.EntityRelationshipStore,
 	escritoStore *models.EscritoStore,
 	escritoSourceStore *models.EscritoSourceStore,
+	opportunityStore *models.OpportunityStore,
 	pool *pgxpool.Pool,
 ) *chi.Mux {
 	sc := scraper.NewScraper()
@@ -320,12 +412,16 @@ func setupRouter(
 	crawlerDeps := crawler.Deps{
 		Domains: crawlDomainStore, Queue: crawlQueueStore, Pages: crawledPageStore,
 		Links: crawlLinkStore, Runs: crawlRunStore, Entities: entityStore,
-		PageEnts: pageEntityStore, Rels: entityRelStore, AI: aiClient,
+		PageEnts: pageEntityStore, Rels: entityRelStore,
+		Opportunities: opportunityStore, AI: aiClient,
 	}
 	crawlerHandler := &handlers.CrawlerHandler{
 		Domains: crawlDomainStore, Queue: crawlQueueStore, Pages: crawledPageStore,
 		Links: crawlLinkStore, Runs: crawlRunStore, Entities: entityStore,
 		PageEnts: pageEntityStore, Rels: entityRelStore, CrawlDeps: crawlerDeps,
+	}
+	opportunityHandler := &handlers.OpportunityHandler{
+		Opportunities: opportunityStore, CrawlDeps: crawlerDeps,
 	}
 	escritosHandler := &handlers.EscritosHandler{
 		Escritos: escritoStore, Sources: escritoSourceStore,
@@ -333,7 +429,7 @@ func setupRouter(
 	}
 	adminHandler := &handlers.AdminHandler{
 		Articles: articleStore, Sources: sourceStore, Fingerprints: fingerprintStore,
-		AI: aiClient, Scraper: sc, Storage: storageClient,
+		Entities: entityStore, AI: aiClient, Scraper: sc, Storage: storageClient,
 	}
 
 	r := chi.NewRouter()
@@ -341,7 +437,7 @@ func setupRouter(
 	r.Use(chimw.Timeout(60 * time.Second))
 	r.Use(middleware.MaxBodySize(10 << 20)) // 10 MB max body
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:*", "https://localhost:*", "http://127.0.0.1:*"},
+		AllowedOrigins:   []string{"http://localhost:*", "https://localhost:*", "http://127.0.0.1:*", "wails://wails"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
@@ -356,16 +452,6 @@ func setupRouter(
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.AutoAuth(userStore))
 
-		// Auth compatibility endpoints (no-op for local app).
-		r.Post("/api/login", func(w http.ResponseWriter, r *http.Request) {
-			user := middleware.UserFromContext(r.Context())
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"user":{"id":"` + user.ID.String() + `","email":"` + user.Email + `","role":"` + user.Role + `"}}`))
-		})
-		r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"status":"logged out"}`))
-		})
 		r.Get("/api/me", authHandler.Me)
 
 		r.Get("/api/items", itemsHandler.ListItems)
@@ -426,7 +512,9 @@ func setupRouter(
 			r.Put("/{id}", escritosHandler.UpdateEscrito)
 			r.Post("/{id}/regenerate", escritosHandler.RegenerateEscrito)
 			r.Post("/{id}/improve", escritosHandler.ImproveEscrito)
+			r.Post("/{id}/expand", escritosHandler.ExpandEscrito)
 			r.Post("/{id}/seo-score", escritosHandler.RecalcSEO)
+			r.Post("/{id}/seo-optimize", escritosHandler.OptimizeSEO)
 			r.Delete("/{id}", escritosHandler.DeleteEscrito)
 			r.Post("/{id}/export", escritosHandler.ExportEscrito)
 		})
@@ -451,6 +539,24 @@ func setupRouter(
 				r.Post("/trigger", crawlerHandler.TriggerCrawl)
 			})
 		})
+
+		r.Route("/api/opportunities", func(r chi.Router) {
+			r.Get("/", opportunityHandler.List)
+			r.Get("/stats", opportunityHandler.Stats)
+			r.Get("/search", opportunityHandler.Search)
+			r.Get("/{id}", opportunityHandler.Get)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAdmin)
+				r.Put("/{id}", opportunityHandler.Update)
+				r.Delete("/{id}", opportunityHandler.Delete)
+				r.Post("/{id}/review", opportunityHandler.Review)
+				r.Post("/refresh-statuses", opportunityHandler.RefreshStatuses)
+				r.Post("/extract", opportunityHandler.TriggerExtraction)
+			})
+		})
+
+		// Open URL in system browser (macOS)
+		r.Get("/api/open-url", handlers.OpenURL)
 
 		analyticsHandler := &handlers.AnalyticsHandler{Pool: pool}
 		r.Get("/api/analytics/tags", analyticsHandler.TagTrends)
@@ -509,6 +615,7 @@ func startWorkerCron(
 	entityRelStore *models.EntityRelationshipStore,
 	escritoStore *models.EscritoStore,
 	escritoSourceStore *models.EscritoSourceStore,
+	opportunityStore *models.OpportunityStore,
 ) *cron.Cron {
 	sc := scraper.NewScraper()
 	stores := scraper.Stores{
@@ -521,7 +628,8 @@ func startWorkerCron(
 	crawlerDeps := crawler.Deps{
 		Domains: crawlDomainStore, Queue: crawlQueueStore, Pages: crawledPageStore,
 		Links: crawlLinkStore, Runs: crawlRunStore, Entities: entityStore,
-		PageEnts: pageEntityStore, Rels: entityRelStore, AI: aiClient,
+		PageEnts: pageEntityStore, Rels: entityRelStore,
+		Opportunities: opportunityStore, AI: aiClient,
 	}
 
 	c := cron.New()
@@ -603,6 +711,28 @@ func startWorkerCron(
 		crawler.RunCrawl(jobCtx, crawlerDeps, 500)
 	})
 
+	// Opportunity extraction: every 30 min
+	c.AddFunc("*/30 * * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+		defer cancel()
+		slog.Info("cron: opportunity extraction")
+		crawler.RunOpportunityExtraction(jobCtx, crawlerDeps, 50)
+	})
+
+	// Opportunity status refresh: daily 6am
+	c.AddFunc("0 6 * * *", func() {
+		wg.Add(1)
+		defer wg.Done()
+		updated, err := opportunityStore.RefreshStatuses(ctx)
+		if err != nil {
+			slog.Error("cron: refresh opportunity statuses", "err", err)
+		} else {
+			slog.Info("cron: opportunity statuses refreshed", "updated", updated)
+		}
+	})
+
 	// Evidence cleanup: 3am
 	c.AddFunc("0 3 * * *", func() {
 		wg.Add(1)
@@ -650,17 +780,4 @@ func checkOllama(host string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == 200
-}
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	default:
-		return
-	}
-	cmd.Run()
 }

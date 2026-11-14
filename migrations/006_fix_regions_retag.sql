@@ -10,7 +10,7 @@ ALTER TABLE sources ADD CONSTRAINT sources_region_check
 
 ALTER TABLE articles DROP CONSTRAINT IF EXISTS articles_region_check;
 ALTER TABLE articles ADD CONSTRAINT articles_region_check
-    CHECK (region IN ('PR', 'Grants', 'Federal', 'Local'));
+    CHECK (region IN ('PR', 'US', 'Global', 'Grants', 'Federal', 'Local'));
 
 -- ── 2. Clean garbage AI tags ───────────────────────────────────
 -- Null out tags that are garbage (long strings, Spanish paragraphs, etc.)

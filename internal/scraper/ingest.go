@@ -21,6 +21,9 @@ const (
 	// maxDailyArticles is the maximum number of articles to ingest per day.
 	maxDailyArticles = 500
 
+	// maxPerSource is the maximum number of articles to ingest per source per run.
+	maxPerSource = 25
+
 	// maxConcurrentAI limits parallel AI enrichment goroutines.
 	maxConcurrentAI = 3
 
@@ -113,12 +116,18 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 			"count", len(discovered),
 		)
 
+		sourceIngested := 0
 		for _, da := range discovered {
 			if ctx.Err() != nil {
 				break
 			}
 
 			if int(ingested.Load()) >= remaining {
+				break
+			}
+
+			if sourceIngested >= maxPerSource {
+				slog.Info("ingestion: per-source limit reached", "source", src.Name, "limit", maxPerSource)
 				break
 			}
 
@@ -211,6 +220,29 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 				continue
 			}
 
+			// PR-relevance filter: US/Federal/Global articles must relate to Puerto Rico.
+			if src.Region != "PR" && src.Region != "Grants" {
+				textForCheck := title + " " + cleanText
+				if !isPRRelevant(textForCheck) {
+					// No keyword match — try Ollama for a quick check
+					if aiClient != nil {
+						relevant, aiErr := aiCheckPRRelevance(ctx, aiClient, title, truncate(cleanText, 500))
+						if aiErr != nil {
+							slog.Debug("ingestion: PR-relevance AI check failed, skipping", "url", rawURL, "err", aiErr)
+							continue
+						}
+						if !relevant {
+							slog.Debug("ingestion: US article not PR-related (AI), skipping", "title", truncate(title, 60))
+							continue
+						}
+						slog.Info("ingestion: US article is PR-related (AI confirmed)", "title", truncate(title, 60))
+					} else {
+						slog.Debug("ingestion: US article not PR-related (keywords), skipping", "title", truncate(title, 60))
+						continue
+					}
+				}
+			}
+
 			// Create fingerprint record.
 			contentHash := HashContent(cleanText)
 			fp := &models.Fingerprint{
@@ -226,10 +258,12 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 			evidenceExpiry := evidenceExpiryTime(defaultEvidencePolicy)
 
 			// Create the article record.
+			srcID := src.ID
 			article := &models.Article{
 				ID:           uuid.New(),
 				Title:        title,
 				Source:       src.Name,
+				SourceID:     &srcID,
 				URL:          rawURL,
 				CanonicalURL: canonical,
 				Region:       src.Region,
@@ -247,6 +281,7 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper, aiClient
 			}
 
 			ingested.Add(1)
+			sourceIngested++
 			slog.Info("ingestion: article created",
 				"id", article.ID,
 				"title", truncate(article.Title, 80),
@@ -485,6 +520,46 @@ func enrichArticle(ctx context.Context, article *models.Article, rawHTML string,
 	slog.Info("enrichment: complete", "id", articleID)
 }
 
+// RunReEnrichment processes articles that are missing embeddings or sentiment.
+// It picks up a batch of articles and runs the full enrichment pipeline on each.
+func RunReEnrichment(ctx context.Context, stores Stores, aiClient *ai.OllamaClient, storageClient *storage.Client, batchSize int) {
+	slog.Info("re-enrichment: starting")
+
+	articles, err := stores.Articles.ListNeedingReEnrichment(ctx, batchSize)
+	if err != nil {
+		slog.Error("re-enrichment: list articles", "err", err)
+		return
+	}
+
+	if len(articles) == 0 {
+		slog.Info("re-enrichment: no articles need enrichment")
+		return
+	}
+
+	slog.Info("re-enrichment: processing batch", "count", len(articles))
+
+	sem := make(chan struct{}, maxConcurrentAI)
+	var wg sync.WaitGroup
+
+	for i := range articles {
+		if ctx.Err() != nil {
+			break
+		}
+
+		wg.Add(1)
+		go func(art *models.Article) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			enrichArticle(ctx, art, "", stores, aiClient, storageClient)
+		}(&articles[i])
+	}
+
+	wg.Wait()
+	slog.Info("re-enrichment: batch complete", "processed", len(articles))
+}
+
 // RunEvidenceCleanup deletes expired evidence from S3 and clears the expiry
 // timestamp on the corresponding articles.
 func RunEvidenceCleanup(ctx context.Context, stores Stores, storageClient *storage.Client) {
@@ -673,6 +748,77 @@ func isNoiseTitle(title string) bool {
 		}
 	}
 	return false
+}
+
+// prKeywords are terms that indicate an article is related to Puerto Rico.
+// Checked case-insensitively against title + body text.
+var prKeywords = []string{
+	"puerto rico",
+	"puertorrique",
+	"boricua",
+	"borinquen",
+	"san juan",
+	"bayamón", "bayamon",
+	"ponce",
+	"carolina, pr",
+	"mayagüez", "mayaguez",
+	"aguadilla",
+	"arecibo",
+	"caguas",
+	"guaynabo",
+	"toa baja",
+	"humacao",
+	"fajardo",
+	"vieques",
+	"culebra",
+	"isla del encanto",
+	"la fortaleza",
+	"el yunque",
+	"fema puerto",
+	"junta de control fiscal",
+	"promesa act",
+	"jones act",
+	"act 60",
+	"act 22",
+	"act 20",
+	"acta 60",
+	"titulo v",
+	"territory",
+	"territorial",
+	"statehood",
+	"commonwealth",
+	"estado libre asociado",
+}
+
+// isPRRelevant does a fast keyword check to see if text mentions Puerto Rico.
+func isPRRelevant(text string) bool {
+	lower := strings.ToLower(text)
+	for _, kw := range prKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// aiCheckPRRelevance uses Ollama to determine if an article is related to Puerto Rico.
+func aiCheckPRRelevance(ctx context.Context, aiClient *ai.OllamaClient, title, body string) (bool, error) {
+	prompt := fmt.Sprintf(`Article title: %s
+
+Article excerpt: %s
+
+Question: Is this article directly related to Puerto Rico, its people, economy, politics, culture, or diaspora?
+Answer with ONLY "yes" or "no".`, title, body)
+
+	result, err := aiClient.Generate(ctx,
+		"You are a news classifier. Answer only 'yes' or 'no'. An article is PR-related if it mentions Puerto Rico, Puerto Ricans, the island's economy, politics, culture, disasters, territorial status, or the Puerto Rican diaspora in the US.",
+		prompt,
+	)
+	if err != nil {
+		return false, err
+	}
+	answer := strings.ToLower(strings.TrimSpace(result))
+	return strings.HasPrefix(answer, "yes") || strings.Contains(answer, "sí"), nil
 }
 
 // truncate shortens a string to the given maximum length, appending "..." if

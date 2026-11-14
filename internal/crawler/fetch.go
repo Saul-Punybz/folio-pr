@@ -31,6 +31,9 @@ type FetchResult struct {
 	ContentType   string
 	ContentLength int
 	Links         []DiscoveredLink
+	ImageURL      string
+	Description   string
+	PublishDate   string
 }
 
 // FetchPage fetches a single page and extracts content + links. Uses a fresh
@@ -157,10 +160,14 @@ func FetchPage(ctx context.Context, pageURL string, allowedDomains map[string]bo
 		return &result, scrErr
 	}
 
-	// Extract clean text from HTML
+	// Extract article content (strips nav, footer, sidebar, ads, scripts)
 	if result.RawHTML != "" {
-		result.CleanText = scraper.CleanText(result.RawHTML)
+		var meta scraper.ArticleMeta
+		result.CleanText, meta = scraper.ExtractArticle(result.RawHTML)
 		result.ContentHash = scraper.HashContent(result.CleanText)
+		result.ImageURL = meta.Image
+		result.Description = meta.Description
+		result.PublishDate = meta.PublishDate
 	}
 
 	return &result, nil

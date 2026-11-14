@@ -8,10 +8,19 @@ import { timeAgo, formatDate } from '../lib/utils';
 const TAG_OPTIONS = [
   'politics', 'economy', 'health', 'education', 'infrastructure',
   'environment', 'crime', 'grants', 'federal', 'legislation',
-  'government', 'technology', 'culture', 'sports',
+  'government', 'technology', 'culture', 'sports', 'business',
+  'small-business', 'nonprofit', 'entrepreneurship', 'tourism',
+  'energy', 'agriculture', 'housing',
 ];
 
-const REGION_OPTIONS = ['PR', 'Federal', 'Grants', 'Local'];
+const REGION_OPTIONS = ['PR', 'US', 'Federal', 'Grants', 'Local'];
+
+const DATE_OPTIONS = [
+  { label: 'All', value: '' },
+  { label: 'Today', value: 'today' },
+  { label: 'Yesterday', value: 'yesterday' },
+  { label: 'This Week', value: 'week' },
+];
 
 interface UndoAction {
   article: Article;
@@ -167,16 +176,18 @@ export default function InboxFeed() {
   const [activeTag, setActiveTag] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [regionFilter, setRegionFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (date?: string) => {
     try {
       setLoading(true);
-      const data = await api.getItems('inbox');
+      const d = date ?? dateFilter;
+      const data = await api.getItems('inbox', 200, 0, d);
       setArticles(data.items || []);
       const badge = document.getElementById('inbox-count');
       if (badge) { badge.textContent = `${data.items?.length ?? 0} new`; }
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
-  }, []);
+  }, [dateFilter]);
 
   const fetchSources = useCallback(async () => {
     try { setSources(await api.getSources()); } catch {}
@@ -312,7 +323,7 @@ export default function InboxFeed() {
     return true;
   });
 
-  const hasActiveFilters = activeTag || sourceFilter || regionFilter;
+  const hasActiveFilters = activeTag || sourceFilter || regionFilter || dateFilter;
   const expandedArticle = expandedId ? filteredArticles.find((a) => a.id === expandedId) : null;
   const activeSources = sources.filter((s) => s.active);
 
@@ -371,6 +382,18 @@ export default function InboxFeed() {
 
       {/* ─── FILTER ROW ─── */}
       <div className="flex items-center gap-3 mb-4 pb-4 border-b border-zinc-100 dark:border-zinc-800">
+        {/* Date filter */}
+        <div className="flex items-center gap-1">
+          {DATE_OPTIONS.map((opt) => (
+            <button key={opt.value} onClick={() => { setDateFilter(opt.value); fetchItems(opt.value); }}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${dateFilter === opt.value ? 'bg-indigo-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+
         {/* Source filter */}
         <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
           className="px-2.5 py-1.5 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-600 dark:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -386,7 +409,7 @@ export default function InboxFeed() {
         </select>
 
         {hasActiveFilters && (
-          <button onClick={() => { setActiveTag(''); setSourceFilter(''); setRegionFilter(''); }}
+          <button onClick={() => { setActiveTag(''); setSourceFilter(''); setRegionFilter(''); setDateFilter(''); fetchItems(''); }}
             className="text-xs text-indigo-500 hover:text-indigo-400 font-medium transition-colors">Clear filters</button>
         )}
 
