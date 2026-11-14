@@ -1,6 +1,6 @@
 # Folio — CONTINUAR
 
-**Este es el único documento que dice qué está construido.** `VISION.md` dice qué se quiere lograr. `CONTINUE.md`, `CONTINUE_CRAWLER.md`, `CRAWLER_BUILD_STATE.md`, `ESCRITOS_BUILD_STATE.md`, `ESCRITOS_CONTINUATION.md` y `SPEC.md` son historia de marzo 2026 y se borran en la tanda 1.
+**Este es el único documento que dice qué está construido.** `VISION.md` dice qué se quiere lograr. Los documentos de estado de marzo 2026 (`CONTINUE.md`, `SPEC.md` y otros cuatro) se borraron en la tanda 1; siguen en la rama `estado-marzo-2026`.
 
 Para retomar: "CONTINUE FOLIO" → leer este archivo.
 
@@ -21,9 +21,9 @@ Que tres personas de la organización abran Folio en el navegador y cada mañana
 
 | # | Pieza | Estado | Tanda |
 |---|---|---|---|
-| 1 | Limpieza: fuera app de Mac (Wails, Postgres embebido), Ollama, Inteligencia/chat, Research, Analytics, grafo de entidades, Telegram. Un solo router. | FALTA | 1 |
-| 2 | Login con sesiones, usuarios por script | FALTA | 1 |
-| 3 | Ingesta RSS sin IA (resumen = descripción del medio) | FALTA (hoy depende de IA) | 1 |
+| 1 | Limpieza: fuera app de Mac (Wails, Postgres embebido), Ollama, Inteligencia/chat, Research, Analytics, grafo de entidades, Telegram. Un solo router. | HECHO | 1 |
+| 2 | Login con sesiones, usuarios por script | HECHO | 1 |
+| 3 | Ingesta RSS sin IA (resumen = descripción del medio) | HECHO | 1 |
 | 3b | Diseño Material 3 Expressive en todo el frontend (ver «Diseño») | FALTA | 2 |
 | 4 | Servidor de Oracle creado, con Postgres y las migraciones aplicadas | FALTA — Oracle sin capacidad (ver Estado) | 3 |
 | 5 | Despliegue en el servidor: binario, Caddy con HTTPS, cron de ingesta, respaldo nocturno | FALTA | 3 |
@@ -101,3 +101,10 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
 - Datos locales de marzo (1,530 artículos, 21 oportunidades, 361 páginas) siguen en `~/Library/Application Support/Folio/pgdata`. No se migran salvo que Saul lo pida.
 - 14 nov 2026 — Oracle: cuenta en prueba gratis, sin instancias ni redes creadas. Se intentó crear `folio` (Ubuntu 24.04, llave `~/.ssh/id_ed25519.pub`) y Oracle respondió **«Out of capacity»** para `VM.Standard.A1.Flex` en AD-1, AD-2 y AD-3, y también para `VM.Standard.E2.1.Micro` en AD-3. No quedó nada creado. Se reintenta al abrir la tanda 3.
 - 14 nov 2026 — Arranca la tanda 1 en la rama `obra-1`. Esta tanda el agente de backend es dueño de todo el Go (incluidos `cmd/`, `internal/config`, `migrations/`) y el de frontend de todo `frontend/`; no se cruzan.
+- 14 nov 2026 — **Tanda 1 cerrada** en `obra-1` (commit `d3ee17d`). Un solo binario `cmd/folio` (HTTP + cron + frontend y migraciones embebidos), sin IA, con login. Go pasó de ~21,800 a ~11,200 líneas. Primeras pruebas: `internal/crawler`, `internal/scraper`, `internal/watch`.
+  - Cómo correrlo: `go build -o folio ./cmd/folio`; variables `DB_*` y `SERVER_PORT` (ver `.env.example`); `FOLIO_PASSWORD='…' ./folio user add correo@org admin`; `./folio`.
+  - Verificado por el orquestador con curl contra una base nueva: sin cookie 401; login 200; las 17 rutas GET que usa el frontend 200; las 8 páginas 200; rutas viejas 404; todas las rutas de `frontend/src/lib/api.ts` existen en `cmd/folio/router.go`; en 75 segundos la ingesta inicial trajo 52 artículos, con resumen. **No se abrió en navegador** (regla de Saul): nada se ha visto renderizado.
+  - Migración 026: invalida la contraseña de `admin@folio.local`, cierra sus sesiones y solo borra la fila si no tiene datos propios.
+  - Pendiente menor: una ruta de página inexistente (p. ej. `/brief`) responde 200 con la página raíz en vez de 404; `/api/logout` con sesión vencida da 401 y no limpia la cookie; `scripts/build-macos.sh` y `docker-compose.yml` siguen describiendo la versión vieja; quedan textos en inglés en el frontend (van con el rediseño); fuentes de EE. UU. como CNN devuelven 403 al scraper y traen páginas de ofertas: revisar la lista de fuentes en la tanda de vigilancias.
+  - No verificado: base vieja con datos (la 026 solo se razonó), S3, compilación y ejecución en Linux, crawler/recrawl/refresco de oportunidades en vivo.
+- 14 nov 2026 — Oracle: más de diez intentos adicionales, todos «Out of capacity» (A1 en las tres zonas, E2 Micro en AD-3). Quedó creada una red vacía `vcn-20261114-1318`, sin subredes. Alternativa verificada en la documentación de Google Cloud: una `e2-micro` gratis al mes en us-west1, us-central1 o us-east1, 30 GB de disco estándar, 1 GB de salida de red al mes, sin fecha de vencimiento; requiere cuenta de facturación.
