@@ -24,16 +24,25 @@ Que tres personas de la organización abran Folio en el navegador y cada mañana
 | 1 | Limpieza: fuera app de Mac (Wails, Postgres embebido), Ollama, Inteligencia/chat, Research, Analytics, grafo de entidades, Telegram. Un solo router. | FALTA | 1 |
 | 2 | Login con sesiones, usuarios por script | FALTA | 1 |
 | 3 | Ingesta RSS sin IA (resumen = descripción del medio) | FALTA (hoy depende de IA) | 1 |
-| 4 | Base en Supabase con las migraciones aplicadas | FALTA — espera la cadena de conexión | 2 |
-| 5 | Despliegue en Vercel: API Go + Astro + cron de ingesta | FALTA | 2 |
-| 6 | Vigilancias sin IA: marcas, personas y temas por términos; resumen diario | FALTA | 3 |
-| 7 | Fondos: APIs de Grants.gov y SAM.gov; crawler de PR con PDF, extracción por patrones y confirmación con un clic | FALTA | 4 |
-| 8 | Páginas fijas diarias con lo que cambió | FALTA | 4 |
-| 9 | Guardados con carpetas por tema y citas | FALTA | 5 |
-| 10 | Escritos: editor, paquete de fuentes, lista SEO/GEO, "Copiar para Claude" | FALTA | 5 |
-| 11 | Enviar por email y publicar a Wix | FALTA | 6 |
+| 3b | Diseño Material 3 Expressive en todo el frontend (ver «Diseño») | FALTA | 2 |
+| 4 | Base en Supabase con las migraciones aplicadas | FALTA — espera la cadena de conexión | 3 |
+| 5 | Despliegue en Vercel: API Go + Astro + cron de ingesta | FALTA | 3 |
+| 6 | Vigilancias sin IA: marcas, personas y temas por términos; resumen diario | FALTA | 4 |
+| 7 | Fondos: APIs de Grants.gov y SAM.gov; crawler de PR con PDF, extracción por patrones y confirmación con un clic | FALTA | 5 |
+| 8 | Páginas fijas diarias con lo que cambió | FALTA | 5 |
+| 9 | Guardados con carpetas por tema y citas | FALTA | 6 |
+| 10 | Escritos: editor, paquete de fuentes, lista SEO/GEO, "Copiar para Claude" | FALTA | 6 |
+| 11 | Enviar por email y publicar a Wix | FALTA | 7 |
 
-**Esta obra cubre las piezas 1 a 5.** Las demás son obras siguientes.
+**Esta obra cubre las piezas 1 a 5 (incluida la 3b).** Las demás son obras siguientes.
+
+### Diseño (pedido de Saul, 14 nov 2026)
+
+- Material 3 Expressive en todo, con animaciones y estilo: formas variadas, resortes, botones que cambian de forma, transición entre páginas, listas segmentadas en vez de cajas con borde.
+- Se mantienen los colores de Folio: **blanco, violeta, naranja y gris.** Hoy el código mezcla `indigo` (341 usos), `violet` (73), `amber` (90) y `orange` (4): se unifica a violeta como primario y naranja como acento, sobre fichas de tema, no clases sueltas.
+- Letra gruesa (450/600/750), títulos fuertes, contraste medio en modo claro, botón claro/oscuro en todas las páginas, `prefers-reduced-motion` respetado.
+- Baldosas y tarjetas que se tocan antes que listas largas; una acción grande por pantalla.
+- Referencia de implementación: `~/Downloads/_Projects/celebrate-studio/src/styles/base.css` y `scripts/tema.mjs`.
 
 ### Lo que NO se construye
 
@@ -46,6 +55,7 @@ Que tres personas de la organización abran Folio en el navegador y cada mañana
 ### Terminado, por pieza
 
 - **1–3:** `go build ./... && go vet ./...` limpio sin el paquete `internal/ai`; `npx tsc --noEmit` sin errores; se corre el binario local, se entra con login y el Inbox muestra noticias traídas en esa corrida.
+- **3b:** se abren Inbox, Guardados, Vigilancia y Fondos en claro y en oscuro; solo se ven blanco, violeta, naranja y gris; las tarjetas entran con resorte y el cambio de página tiene transición.
 - **4:** las 25 migraciones (más las nuevas) registradas en `_migrations` en Supabase.
 - **5:** se abre la URL de Vercel, pide login, se entra, y el Inbox muestra noticias traídas por el cron, no por una corrida manual.
 
@@ -53,19 +63,20 @@ Que tres personas de la organización abran Folio en el navegador y cada mañana
 
 | Partida | Modelo | Estimado |
 |---|---|---|
-| Orquestador, ~2 h | Opus | $9 |
+| Orquestador, ~2.5 h | Opus | $11 |
 | Tanda 1 · backend: quitar IA de ingesta y handlers, router único, login | Opus | $5 |
 | Tanda 1 · frontend: login, quitar páginas, arreglar 3 errores de tipos | Sonnet | $3 |
-| Tanda 2 · Vercel + cron + conexión Supabase | Sonnet | $3 |
-| Verificadores de cierre (2) | Haiku | $1 |
-| Reserva para segunda vuelta | — | $9 |
-| **Total** | | **~$30, 2 tandas** |
+| Tanda 2 · diseño Expressive: fichas de tema, movimiento, las pantallas que quedan | Sonnet | $5 |
+| Tanda 3 · Vercel + cron + conexión Supabase | Sonnet | $3 |
+| Verificadores de cierre (3) | Haiku | $1.50 |
+| Reserva para segunda vuelta | — | $11 |
+| **Total** | | **~$40, 3 tandas** |
 
 ### Archivos compartidos (solo los toca el orquestador)
 
-`cmd/api/main.go` · `frontend/src/lib/api.ts` · `frontend/src/layouts/Layout.astro` · `migrations/` · `go.mod` / `go.sum` · `internal/config/config.go` · `vercel.json`
+`cmd/api/main.go` · `frontend/src/lib/api.ts` · `frontend/src/layouts/Layout.astro` · `frontend/src/styles/global.css` · `frontend/tailwind.config.mjs` · `migrations/` · `go.mod` / `go.sum` · `internal/config/config.go` · `vercel.json`
 
-### Por confirmar al abrir la tanda 2
+### Por confirmar al abrir la tanda 3
 
 - Si el backend va en el runtime de Go de Vercel o como imagen de contenedor (ya hay `Dockerfile`).
 - Duración máxima por función y frecuencia de cron en el plan de la cuenta.
