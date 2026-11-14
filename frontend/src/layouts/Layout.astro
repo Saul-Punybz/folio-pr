@@ -22,12 +22,12 @@ const icons: Record<string, string> = {
 };
 
 const navItems = [
-  { href: '/inbox', label: 'Inbox', key: 'inbox' as const, badge: false, icon: 'inbox' },
-  { href: '/saved', label: 'Guardados', key: 'saved' as const, badge: false, icon: 'bookmark' },
-  { href: '/archive', label: 'Archivo', key: 'archive' as const, badge: false, icon: 'archive' },
-  { href: '/watchlist', label: 'Vigilancia', key: 'vigilancia' as const, badge: true, icon: 'eye' },
-  { href: '/crawler', label: 'Fondos', key: 'crawler' as const, badge: false, icon: 'globe' },
-  { href: '/settings', label: 'Ajustes', key: 'settings' as const, badge: false, icon: 'gear' },
+  { href: '/inbox', label: 'Inbox', key: 'inbox' as const, badge: false, fondosBadge: false, icon: 'inbox' },
+  { href: '/saved', label: 'Guardados', key: 'saved' as const, badge: false, fondosBadge: false, icon: 'bookmark' },
+  { href: '/archive', label: 'Archivo', key: 'archive' as const, badge: false, fondosBadge: false, icon: 'archive' },
+  { href: '/watchlist', label: 'Vigilancia', key: 'vigilancia' as const, badge: true, fondosBadge: false, icon: 'eye' },
+  { href: '/crawler', label: 'Fondos', key: 'crawler' as const, badge: false, fondosBadge: true, icon: 'globe' },
+  { href: '/settings', label: 'Ajustes', key: 'settings' as const, badge: false, fondosBadge: false, icon: 'gear' },
 ];
 ---
 
@@ -83,6 +83,7 @@ const navItems = [
             <Fragment set:html={icons[item.icon]} />
             <span class="truncate">{item.label}</span>
             {item.badge && <span class="nav-badge hidden ml-auto vig-badge" />}
+            {item.fondosBadge && <span class="nav-badge hidden ml-auto fondos-badge" />}
           </a>
         ))}
       </nav>
@@ -122,6 +123,7 @@ const navItems = [
           <span class="pill">
             <Fragment set:html={icons[item.icon]} />
             {item.badge && <span class="nav-badge hidden vig-badge" />}
+            {item.fondosBadge && <span class="nav-badge hidden fondos-badge" />}
           </span>
           <span class="truncate max-w-full">{item.label}</span>
         </a>
@@ -153,9 +155,28 @@ const navItems = [
             }
           } catch (e) {}
         }
+        async function pollPending() {
+          try {
+            const res = await fetch('/api/opportunities/stats', { credentials: 'same-origin' });
+            if (res.ok) {
+              const data = await res.json();
+              const n = data.pending || 0;
+              document.querySelectorAll('.fondos-badge').forEach(function (badge) {
+                if (n > 0) {
+                  badge.textContent = n > 99 ? '99+' : String(n);
+                  badge.classList.remove('hidden');
+                } else {
+                  badge.classList.add('hidden');
+                }
+              });
+            }
+          } catch (e) {}
+        }
+        window.__folioRefreshFondos = pollPending;
         pollUnseen();
+        pollPending();
         if (!window.__folioPoll) {
-          window.__folioPoll = setInterval(pollUnseen, 60000);
+          window.__folioPoll = setInterval(function () { pollUnseen(); pollPending(); }, 60000);
         }
       })();
     </script>

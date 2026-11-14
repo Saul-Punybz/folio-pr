@@ -101,6 +101,8 @@ export interface UnseenCountResponse {
 
 // ── Crawler (Government Document Crawler) ───────────────────────
 
+export type OpportunityLevel = 'federal' | 'estatal' | 'municipal' | 'local';
+
 export interface CrawlDomain {
   id: string;
   domain: string;
@@ -110,6 +112,7 @@ export interface CrawlDomain {
   recrawl_hours: number;
   priority: number;
   active: boolean;
+  level?: OpportunityLevel;
   page_count: number;
   last_crawled_at: string | null;
   created_at: string;
@@ -188,6 +191,13 @@ export interface Opportunity {
   confidence: number;
   raw_extraction: Record<string, any>;
   reviewed: boolean;
+  reference?: string;
+  level?: OpportunityLevel;
+  source_kind?: 'pagina' | 'pdf' | 'api';
+  document_url?: string;
+  document_scanned?: boolean;
+  contact_phone?: string;
+  evidence?: { deadline?: string; amount?: string; reference?: string; title?: string };
   created_at: string;
   updated_at: string;
 }
@@ -201,6 +211,8 @@ export interface OpportunitiesResponse {
 export interface OpportunityStatsResponse {
   total: number;
   by_status: Record<string, number>;
+  pending?: number;
+  closing_soon?: number;
 }
 
 // Rutas públicas: un 401 aquí es un error normal, no una sesión vencida.
@@ -413,10 +425,10 @@ export const api = {
   getCrawlerDomains: (): Promise<{ domains: CrawlDomain[]; count: number }> =>
     fetchAPI('/crawler/domains'),
 
-  createCrawlerDomain: (data: { domain: string; label: string; category: string; max_depth: number; recrawl_hours: number; priority: number }): Promise<CrawlDomain> =>
+  createCrawlerDomain: (data: { domain: string; label: string; category: string; level?: string; max_depth: number; recrawl_hours: number; priority: number }): Promise<CrawlDomain> =>
     fetchAPI('/crawler/domains', { method: 'POST', body: JSON.stringify(data) }),
 
-  updateCrawlerDomain: (id: string, data: { label: string; category: string; max_depth: number; recrawl_hours: number; priority: number }): Promise<{ status: string }> =>
+  updateCrawlerDomain: (id: string, data: { label: string; category: string; level?: string; max_depth: number; recrawl_hours: number; priority: number }): Promise<{ status: string }> =>
     fetchAPI(`/crawler/domains/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   toggleCrawlerDomain: (id: string, active: boolean): Promise<{ status: string }> =>
@@ -429,12 +441,14 @@ export const api = {
     fetchAPI('/crawler/trigger', { method: 'POST' }),
 
   // Opportunities (Grant/RFP Tracker)
-  getOpportunities: (params?: { status?: string; category?: string; domain_id?: string; sort?: string; limit?: number; offset?: number }): Promise<OpportunitiesResponse> => {
+  getOpportunities: (params?: { status?: string; category?: string; domain_id?: string; sort?: string; limit?: number; offset?: number; reviewed?: boolean; level?: string }): Promise<OpportunitiesResponse> => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set('status', params.status);
     if (params?.category) qs.set('category', params.category);
     if (params?.domain_id) qs.set('domain_id', params.domain_id);
     if (params?.sort) qs.set('sort', params.sort);
+    if (params?.reviewed !== undefined) qs.set('reviewed', String(params.reviewed));
+    if (params?.level) qs.set('level', params.level);
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.offset) qs.set('offset', String(params.offset));
     return fetchAPI(`/opportunities?${qs}`);
