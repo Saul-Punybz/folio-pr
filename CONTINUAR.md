@@ -12,7 +12,7 @@ Que tres personas de la organización abran Folio en el navegador y cada mañana
 
 ### Decisiones tomadas
 
-- Hospedaje: Vercel (cuenta de Saul, usuario `saul-6081`) + Supabase (proyecto `gcmoegzjnxrmtjtukkia`).
+- Hospedaje: **servidor propio en Oracle Cloud (Always Free), región Ashburn.** Decidido el 14 nov 2026 en lugar de Vercel + Supabase: costo $0 con respaldos, Go corre tal cual, sin límite de tiempo para el crawl y con sitio para OCR. Un solo binario (API + cron + frontend y migraciones embebidos) con Postgres y Caddy instalados en el servidor; sin Docker. Vercel + Supabase queda como plan B.
 - Cero IA dentro de Folio. Ollama sale. La única IA es el botón "Copiar para Claude" en Escritos, que usa el plan de la organización fuera de Folio. MCP queda para después.
 - Login: se restaura el de sesiones propio que ya existía (`internal/middleware/auth.go` `SessionAuth`, `internal/handlers/auth.go`, y `LoginForm.tsx` + `login.astro` desde git). Usuarios creados por script; nada de `admin/admin`.
 - Blog: Wix por API; otros por exportación HTML/Markdown.
@@ -25,8 +25,8 @@ Que tres personas de la organización abran Folio en el navegador y cada mañana
 | 2 | Login con sesiones, usuarios por script | FALTA | 1 |
 | 3 | Ingesta RSS sin IA (resumen = descripción del medio) | FALTA (hoy depende de IA) | 1 |
 | 3b | Diseño Material 3 Expressive en todo el frontend (ver «Diseño») | FALTA | 2 |
-| 4 | Base en Supabase con las migraciones aplicadas | FALTA — espera la cadena de conexión | 3 |
-| 5 | Despliegue en Vercel: API Go + Astro + cron de ingesta | FALTA | 3 |
+| 4 | Servidor de Oracle creado, con Postgres y las migraciones aplicadas | FALTA — Oracle sin capacidad (ver Estado) | 3 |
+| 5 | Despliegue en el servidor: binario, Caddy con HTTPS, cron de ingesta, respaldo nocturno | FALTA | 3 |
 | 6 | Vigilancias sin IA: marcas, personas y temas por términos; resumen diario | FALTA | 4 |
 | 7 | Fondos: APIs de Grants.gov y SAM.gov; crawler de PR con PDF, extracción por patrones y confirmación con un clic | FALTA | 5 |
 | 8 | Páginas fijas diarias con lo que cambió | FALTA | 5 |
@@ -68,8 +68,8 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
 
 - **1–3:** `go build ./... && go vet ./...` limpio sin el paquete `internal/ai`; `npx tsc --noEmit` sin errores; se corre el binario local, se entra con login y el Inbox muestra noticias traídas en esa corrida.
 - **3b:** se abren Inbox, Guardados, Vigilancia y Fondos en claro y en oscuro; solo se ven blanco, violeta, naranja y gris; las tarjetas entran con resorte y el cambio de página tiene transición.
-- **4:** las 25 migraciones (más las nuevas) registradas en `_migrations` en Supabase.
-- **5:** se abre la URL de Vercel, pide login, se entra, y el Inbox muestra noticias traídas por el cron, no por una corrida manual.
+- **4:** se entra por SSH al servidor y las migraciones están registradas en `_migrations`.
+- **5:** se abre la dirección del servidor por HTTPS, pide login, se entra, y el Inbox muestra noticias traídas por el cron, no por una corrida manual.
 
 ### Presupuesto (equivalencias en precio de API, no cargos)
 
@@ -79,7 +79,7 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
 | Tanda 1 · backend: quitar IA de ingesta y handlers, router único, login | Opus | $5 |
 | Tanda 1 · frontend: login, quitar páginas, arreglar 3 errores de tipos | Sonnet | $3 |
 | Tanda 2 · diseño Expressive: fichas de tema, movimiento, las pantallas que quedan | Sonnet | $5 |
-| Tanda 3 · Vercel + cron + conexión Supabase | Sonnet | $3 |
+| Tanda 3 · servidor Oracle: binario, Postgres, Caddy, respaldo | Sonnet | $3 |
 | Verificadores de cierre (3) | Haiku | $1.50 |
 | Reserva para segunda vuelta | — | $11 |
 | **Total** | | **~$40, 3 tandas** |
@@ -90,12 +90,14 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
 
 ### Por confirmar al abrir la tanda 3
 
-- Si el backend va en el runtime de Go de Vercel o como imagen de contenedor (ya hay `Dockerfile`).
-- Duración máxima por función y frecuencia de cron en el plan de la cuenta.
-- Modo de conexión de pgx con el pooler de Supabase.
+- Que Oracle tenga capacidad (ver Estado). Si sigue sin haber, decidir entre reintentar, pasar la cuenta a pago por uso (los recursos Always Free siguen gratis) o el plan B.
+- Dirección pública: dominio propio o DuckDNS, para que Caddy saque el certificado.
+- Dónde va el respaldo nocturno de la base.
 
 ## Estado
 
 - 14 nov 2026 — Todo el trabajo suelto de marzo quedó en la rama `estado-marzo-2026` (commit `de08f5b`), subida a GitHub. `main` sin tocar.
 - 14 nov 2026 — Revisión del código: compila, cero pruebas. Errores conocidos del crawler y de la extracción de oportunidades (se arreglan en la tanda 4, cuando se rehace Fondos): páginas marcadas como revisadas aunque falle la extracción; `parseAmountCents` multiplica por un millón con cualquier "m"; `crawler.go:129` guarda un carácter basura en vez del código HTTP; sin `robots.txt`; sin PDF.
 - Datos locales de marzo (1,530 artículos, 21 oportunidades, 361 páginas) siguen en `~/Library/Application Support/Folio/pgdata`. No se migran salvo que Saul lo pida.
+- 14 nov 2026 — Oracle: cuenta en prueba gratis, sin instancias ni redes creadas. Se intentó crear `folio` (Ubuntu 24.04, llave `~/.ssh/id_ed25519.pub`) y Oracle respondió **«Out of capacity»** para `VM.Standard.A1.Flex` en AD-1, AD-2 y AD-3, y también para `VM.Standard.E2.1.Micro` en AD-3. No quedó nada creado. Se reintenta al abrir la tanda 3.
+- 14 nov 2026 — Arranca la tanda 1 en la rama `obra-1`. Esta tanda el agente de backend es dueño de todo el Go (incluidos `cmd/`, `internal/config`, `migrations/`) y el de frontend de todo `frontend/`; no se cruzan.
