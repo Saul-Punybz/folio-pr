@@ -2,6 +2,7 @@ package extract
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -22,11 +23,15 @@ var multWords = map[string]int64{
 }
 
 var (
-	amountPos4       = regexp.MustCompile(`cuantia|presupuesto|asignacion|funding\s+available|available\s+funding|fondos\s+disponibles|total\s+(?:program\s+)?funding|estimated\s+(?:total\s+)?(?:program\s+)?funding|valor\s+total|funds?\s+available`)
-	amountPos3       = regexp.MustCompile(`asignado|\bawards?\b|\bmonto|ceiling|valor\s+estimado|subvencion|grant\s+(?:amount|of)|financiamiento|disponible|ayuda\s+de|premio|stipend|\bbeca\s+de`)
-	amountPos2       = regexp.MustCompile(`cantidad|\btotal\b|estimado|estimated|\bfondos\b|funding|importe|\bvalor\b|\bmaximo|maximum|por\s+un\s+total`)
-	amountUpTo       = regexp.MustCompile(`(?:\bhasta|\bup\s+to|\bde\s+hasta)\s*(?:un\s+)?(?:maximo\s+de\s+)?$`)
-	amountNeg        = regexp.MustCompile(`fianza|\bbond\b|garantia|costo\s+d|cost\s+of|cuesta|pliego|registro|inscripcion|matricula|\bcargo|\bfees?\b|tarifa|arancel|\bcuota|deposito|\bdeposit|multa|penalidad|penalty|salario|salary|sueldo|reembols|ejemplo|example|e\.g|no\s+representa|does\s+not\s+represent|not\s+the\s+(?:available|total)|costo\s+unitario|\bseguro|insurance|por\s+ciento|\bpareo|cost\s+share|match`)
+	amountCeiling = regexp.MustCompile(`award\s+ceiling|ceiling\s+(?:per|for|of)|maximum\s+award`)
+	amountFloor   = regexp.MustCompile(`award\s+floor|minimum\s+award`)
+	amountPos4    = regexp.MustCompile(`cuantia|presupuesto|asignacion|asignados|fondos\s+(?:asignados|totales|para\s+(?:este|esta|el|la))|monto\s+(?:total|disponible|asignado|maximo|estimado)|total\s+(?:de\s+)?fondos|funding\s+available|available\s+funding|fondos\s+disponibles|total\s+(?:program\s+)?funding|estimated\s+(?:total\s+)?(?:program\s+)?funding|valor\s+total|funds?\s+available`)
+	amountPos3    = regexp.MustCompile(`asignado|\bawards?\b|\bmonto|ceiling|valor\s+estimado|subvencion|grant\s+(?:amount|of)|financiamiento|disponible|ayuda\s+de|premio|stipend|\bbeca\s+de`)
+	amountPos2    = regexp.MustCompile(`cantidad|\btotal\b|estimado|estimated|\bfondos\b|funding|importe|\bvalor\b|\bmaximo|maximum|por\s+un\s+total`)
+	amountUpTo    = regexp.MustCompile(`(?:\bhasta|\bup\s+to|\bde\s+hasta|\bno\s+(?:excedera|podra\s+exceder|sobrepasara)|\bnot\s+to\s+exceed|\bnot\s+exceed(?:ing)?|\bmaximo\s+de|\bmaximum\s+of)\s*(?:de\s+|la\s+(?:suma|cantidad)\s+de\s+|la\s+cantidad\s+de\s+|un\s+)?(?:maximo\s+de\s+)?(?:\(?us\)?\s?)?$`)
+	amountNeg     = regexp.MustCompile(`fianza|\bbond\b|garantia|costo\s+d|cost\s+of|cuesta|pliego|registro|inscripcion|matricula|\bcargo|\bfees?\b|tarifa|arancel|\bcuota|deposito|\bdeposit|multa|penalidad|penalty|salario|salary|sueldo|reembols|ejemplo|example|e\.g|no\s+representa|does\s+not\s+represent|not\s+the\s+(?:available|total)|costo\s+unitario|\bseguro|insurance|por\s+ciento|\bpareo|cost\s+share|match`)
+	// Cargos y garantías: se miran en una ventana más amplia que amountNeg.
+	amountNegWide    = regexp.MustCompile(`multas?\b|penalidad|penalidades|penalizacion|penalty|penalties|sancion|sanciones|danos\s+liquidados|liquidated\s+damages|\bfianzas?\b|bid\s+bond|bid\s+security|performance\s+bond|garantia\s+de|deposito|\bdeposit|poliza|polizas|seguros?\s+de|insurance|costo\s+(?:del|de\s+los|de\s+las)\s+pliegos?|precio\s+(?:del|de\s+los)\s+pliegos?|costo\s+de\s+(?:los\s+)?documentos|cost\s+of\s+(?:the\s+)?(?:bid\s+)?documents|responsabilidad\s+(?:civil|publica)|liability|retencion|retainage|cada\s+dia|por\s+dia\s+de\s+(?:atraso|retraso)|per\s+day\s+of\s+delay`)
 	amountExample    = regexp.MustCompile(`ejemplo|example|for\s+instance|supongamos|suppose|illustrat`)
 	amountDisclaimer = regexp.MustCompile(`^[\s.]*(?:esta|dicha|esa)\s+(?:cantidad|suma|cifra)[^.]{0,220}?no\s+(?:representa|es\s+el)|^[\s.]*(?:this|that)\s+(?:amount|figure|total)[^.]{0,220}?(?:does\s+not|is\s+not)`)
 	amountNegAfter   = regexp.MustCompile(`^[\s/\-]{0,3}(?:mensual|semanal|diari|anual\s+por|al\s+mes|por\s+(?:hora|dia|mes|ano|semana|milla|empleado|persona|participante|pagina|copia|unidad|cada)|per\s+(?:hour|day|month|year|week|mile|person|participant|unit|diem|each)|monthly|weekly|hourly|(?:mo|month|mes|hr|hour|ano|year|dia|day)\b|de\s+fianza|de\s+matricula|de\s+cargo|de\s+deposito|fee|cada\b|each\b)`)
@@ -118,6 +123,7 @@ func (d *doc) findAmount() (amountHit, bool) {
 	if len(hits) == 0 {
 		return amountHit{}, false
 	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].s < hits[j].s })
 	distinct := map[int64]bool{}
 	for i := range hits {
 		h := &hits[i]
@@ -128,6 +134,14 @@ func (d *doc) findAmount() (amountHit, bool) {
 		}
 		cs := d.clauseStart(h.s, 70)
 		ce := d.clauseEnd(h.e, 40)
+		// La etiqueta de una cifra no se contagia a la siguiente: "Award
+		// Ceiling: $22M Award Floor: $200K" son dos rótulos distintos.
+		if i > 0 && hits[i-1].e > cs && hits[i-1].e <= h.s {
+			cs = hits[i-1].e
+		}
+		if i+1 < len(hits) && hits[i+1].s >= h.e && hits[i+1].s < ce {
+			ce = hits[i+1].s
+		}
 		before := d.sub(cs, h.s)
 		after := d.sub(h.e, ce)
 		if amountExample.MatchString(d.sub(d.clauseStart(h.s, 220), h.s)) {
@@ -158,7 +172,22 @@ func (d *doc) findAmount() (amountHit, bool) {
 		if r := []rune(short); len(r) > 60 {
 			short = string(r[len(r)-60:])
 		}
+		// Penalidades, multas, fianzas, seguros...: ventana amplia hacia atrás,
+		// salvo que después del cargo aparezca un rótulo claro de fondos.
+		if wb := d.sub(maxInt(d.clauseStart(h.s, 110), cs), h.s); wb != "" {
+			if ms := amountNegWide.FindAllStringIndex(wb, -1); len(ms) > 0 {
+				rest := wb[ms[len(ms)-1][1]:]
+				if !(amountPos4.MatchString(rest) || amountCeiling.MatchString(rest) || amountPos3.MatchString(rest)) {
+					h.excluded = true
+					continue
+				}
+			}
+		}
 		switch {
+		case amountCeiling.MatchString(short):
+			h.tier = 5
+		case amountFloor.MatchString(short):
+			h.tier = 3
 		case amountPos4.MatchString(short) || amountPos4.MatchString(after):
 			h.tier = 4
 		case amountPos3.MatchString(short) || amountPos3.MatchString(after):
@@ -216,4 +245,11 @@ func AmountCents(s string) int64 {
 		}
 	}
 	return 0
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

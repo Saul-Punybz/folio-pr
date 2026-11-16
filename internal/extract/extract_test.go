@@ -54,9 +54,9 @@ var cases = []tc{
 		cand: false, maxScore: 20},
 	{name: "real/Vivienda menú con solicitudes y fondos", text: fxViviendaNav, real: true,
 		cand: false, maxScore: 25},
-	{name: "real/Grants.gov Title X (campos de la API)", text: fxGrantsGov, real: true,
+	{name: "real/Grants.gov Title X (techo por premio $22M, no el total del programa $257M)", text: fxGrantsGov, real: true,
 		cand: true, minScore: 70, cat: "grant", title: "Title X Family Planning Services Grants", ref: "Opportunity Number PA-FPH-27-001",
-		deadline: "2027-01-11 23:59", amount: "$257,000,000", cents: 25_700_000_000, email: "Eric.West@hhs.gov"},
+		deadline: "2027-01-11 23:59", amount: "$22,000,000", cents: 2_200_000_000, email: "Eric.West@hhs.gov"},
 	{name: "real/Federal Register suplemento SOR (noticia a beneficiarios)", text: fxFedRegSOR, real: true,
 		cand: false, maxScore: 40, cat: "grant", amount: "$500,000", cents: 50_000_000},
 
@@ -78,7 +78,7 @@ var cases = []tc{
 	{name: "en/NOFO con fecha en inglés y contacto",
 		text: "Notice of Funding Opportunity\nNOFO Number: HHS-2026-ACL-AOA-0001\nApplications are due by January 15, 2027 at 5:00 PM ET. Award ceiling: $500,000 per award. Total funding available: $4.5 million.\nQuestions: grants@acl.gov or 202-555-0147.",
 		cand: true, minScore: 75, cat: "grant", ref: "NOFO Number HHS-2026-ACL-AOA-0001", deadline: "2027-01-15 17:00",
-		amount: "$4.5 million", cents: 450_000_000, email: "grants@acl.gov", phone: "202-555-0147"},
+		amount: "$500,000", cents: 50_000_000, email: "grants@acl.gov", phone: "202-555-0147"},
 	{name: "es/beca con monto mensual (no confundir con millones)",
 		text: "Convocatoria de becas 2026-2027. Fecha límite para solicitar: 15 de enero de 2027. Los estudiantes seleccionados recibirán $500 mensuales durante el año académico. Requisitos de elegibilidad en el formulario.",
 		cand: true, minScore: 50, cat: "scholarship", deadline: "2027-01-15 23:59"},
@@ -220,12 +220,14 @@ func TestFormatosDeFecha(t *testing.T) {
 		{"Deadline: November 30, 2026", "2026-11-30 23:59"},
 		{"Deadline: Nov 30th, 2026", "2026-11-30 23:59"},
 		{"Due: 30 November 2026 at 11:59 PM", "2026-11-30 23:59"},
-		{"Cierre: 1ro de diciembre de 2026", ""}, // "1ro": formato no soportado, se deja vacío
+		{"Cierre: 1ro de diciembre de 2026", "2026-12-01 23:59"},
+		{"Cierre: 1ero de diciembre de 2026", "2026-12-01 23:59"},
+		{"Cierre: 1º de diciembre de 2026", "2026-12-01 23:59"},
 		{"Cierre: 1 de diciembre de 2026 a las 1:00 p.m.", "2026-12-01 13:00"},
 		{"Cierre: martes, 1 de diciembre de 2026", "2026-12-01 23:59"},
 		{"Closing date: Sept. 30, 2026", "2026-09-30 23:59"},
 		{"Fecha límite: 30 de septiembre de 2026", "2026-09-30 23:59"},
-		{"Fecha límite: 30 de noviembre", ""}, // sin año: no se inventa
+		{"Fecha límite: 30 de noviembre", "2026-11-30 23:59"}, // sin año: el de "ahora" (1 sep 2026)
 	}
 	for _, c := range formats {
 		f := Opportunity("RFP 2026-001. Solicitud de propuestas. "+c.in+".", time.Date(2026, 9, 1, 9, 0, 0, 0, ast))

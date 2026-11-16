@@ -35,7 +35,9 @@ type Found struct {
 //	  acción (someter, requisitos, elegibilidad) · +3 contacto
 //	−25 marcadores de pasado/noticia ("se celebró", "adjudicó", "noticias"),
 //	  −10 si aun así hay fecha límite futura
-//	−20 adenda/enmienda/suplemento (no es una convocatoria nueva)
+//	−20 adenda/enmienda/suplemento (no es una convocatoria nueva): nunca es
+//	  candidata; si trae referencia y fecha límite se devuelven, con
+//	  Evidence["amendment"]="1", para que quien llama actualice la original
 //	−20 listado (≥3 fechas límite o ≥3 referencias distintas): no es un aviso;
 //	  además se dejan vacíos fecha, referencia, monto y título
 //	IsCandidate = Score ≥ 45 y la fecha límite, si existe, no ha vencido
@@ -75,7 +77,10 @@ func Opportunity(text string, now time.Time) Found {
 	}
 
 	// Fecha límite.
-	dl, hasDL := d.findDeadline(now)
+	// Es enmienda si lo dice al comienzo (título/encabezado); un RFP completo
+	// que menciona "adenda" en el cuerpo sigue siendo una convocatoria.
+	amendment := amendmentMarkers.MatchString(d.fold[:min(len(d.fold), 300)])
+	dl, hasDL := d.findDeadline(now, amendment)
 	refs := d.findRefs()
 	sort.Slice(refs, func(i, j int) bool { return refs[i].s < refs[j].s })
 	// Un listado (varias fechas límite o varias referencias distintas) no es
@@ -155,6 +160,15 @@ func Opportunity(text string, now time.Time) Found {
 	}
 	f.Score = score
 	f.IsCandidate = score >= 45 && !expired
+	if amendment {
+		// Una enmienda no es una convocatoria nueva. Si trae referencia y
+		// fecha, se entrega la nueva fecha para que quien llama actualice la
+		// convocatoria original.
+		f.IsCandidate = false
+		if f.Reference != "" && f.Deadline != nil {
+			f.Evidence["amendment"] = "1"
+		}
+	}
 	if f.Category == "" {
 		f.Category = "other"
 	}
