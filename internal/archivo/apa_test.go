@@ -114,6 +114,17 @@ func TestAPA(t *testing.T) {
 			plain: "@vimenti. (2025, 19 de octubre). Feria de empleo este viernes [Publicación]. Mastodon. https://mastodon.social/@vimenti/1234",
 		},
 		{
+			name:  "episodio de podcast sin anfitrión",
+			m:     Meta{Kind: KindPodcast, Platform: "Apple Podcasts", Title: "Emprender en la isla", Site: "Voces de PR", Published: d, URL: "https://podcasts.apple.com/us/podcast/x/id1?i=2"},
+			plain: "Emprender en la isla [Episodio de pódcast]. (2025, 19 de octubre). En Voces de PR. Apple Podcasts. https://podcasts.apple.com/us/podcast/x/id1?i=2",
+			md:    "Emprender en la isla [Episodio de pódcast]. (2025, 19 de octubre). En *Voces de PR*. Apple Podcasts. https://podcasts.apple.com/us/podcast/x/id1?i=2",
+		},
+		{
+			name:  "episodio de podcast con anfitrión",
+			m:     Meta{Kind: KindPodcast, Platform: "Apple Podcasts", Title: "Emprender en la isla", Site: "Voces de PR", Authors: []string{"Beatriz Rivera Batista"}, Published: d, URL: "https://podcasts.apple.com/x"},
+			plain: "Rivera Batista, B. (2025, 19 de octubre). Emprender en la isla [Episodio de pódcast]. En Voces de PR. Apple Podcasts. https://podcasts.apple.com/x",
+		},
+		{
 			name:  "video de YouTube",
 			m:     Meta{Kind: KindVideo, Platform: "YouTube", Title: "Historia de éxito: Libros 787", Authors: []string{"Project Makers PR"}, Published: d, URL: "https://www.youtube.com/watch?v=abc"},
 			plain: "Project Makers PR. (2025, 19 de octubre). Historia de éxito: Libros 787 [Video]. YouTube. https://www.youtube.com/watch?v=abc",

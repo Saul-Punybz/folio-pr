@@ -249,8 +249,8 @@ func startCron(ctx context.Context, t *jobTracker, j *jobs, opts cronOptions) (*
 		spec string
 		tk   *task
 	}{
-		{"0 */4 * * *", j.ingestion},
-		{"0 1,7,13,19 * * *", j.watchScan},
+		{"0 */3 * * *", j.ingestion},
+		{"30 */3 * * *", j.watchScan},
 		{"0 */2 * * *", j.fondos},
 		{"0 2 * * *", j.recrawl},
 		{"30 5 * * *", j.grants},

@@ -38,7 +38,7 @@ Luego abre Folio otra vez.
 ## 3. Crear su acceso
 
 1. Folio abre el navegador en `http://127.0.0.1:47615` y muestra **Crea tu acceso**.
-2. Ella pone su correo y una contraseña de al menos 10 letras. Que la guarde en su gestor de contraseñas o en el llavero de la Mac.
+2. Ella pone su correo y una contraseña de al menos 10 caracteres. Que la guarde en su gestor de contraseñas o en el llavero de la Mac.
 3. Entra al **Inbox**.
 
 Folio solo funciona dentro de esa Mac: nadie más en la red puede abrirlo.
@@ -74,12 +74,12 @@ Es lo que más menciones en la web le trae a cada marca.
 - **Abrirlo:** doble clic en Folio cada mañana. Se pone al día solo.
 - **Que abra solo al encender la Mac** (opcional): **Ajustes del Sistema → General → Ítems de inicio → +** y elige Folio.
 - **Cerrarlo:** **Ajustes** dentro de Folio **→ Cerrar Folio**. Si la Mac se apaga con Folio abierto, no pasa nada: se recupera solo al abrirlo.
-- **Mientras esté abierto** vuelve a buscar varias veces al día. Si la Mac estuvo apagada, busca al abrirlo.
+- **Mientras esté abierto** busca noticias y menciones de las marcas cada 3 horas, y fondos cada 2 horas. Si la Mac estuvo apagada, busca al abrirlo.
 
 ## Dónde están sus datos
 
 - Todo vive en esa Mac, en `~/Library/Application Support/Folio2` (noticias, marcas, fondos, PDF guardados).
-- Folio hace un **respaldo diario** en `Folio2/respaldos` y guarda los últimos 14.
+- Folio hace un **respaldo diario** en `Folio2/respaldos` (solo mientras está abierto: a mediodía y al abrirlo si el último tiene más de 20 horas) y guarda los últimos 14.
 - Para estar seguros de no perder nada, que ese disco entre en **Time Machine** o en su respaldo habitual.
 
 ## Actualizar Folio más adelante
@@ -95,5 +95,20 @@ Es lo que más menciones en la web le trae a cada marca.
 | macOS dice que la app está dañada o que no se puede abrir | Paso 2. Si sigue, la línea de Terminal del paso 2 |
 | Doble clic y no pasa nada | Abre el navegador en `http://127.0.0.1:47615`: puede que ya esté abierto |
 | Aviso de que el puerto 47615 está ocupado | Reinicia la Mac y abre Folio otra vez |
-| Olvidó la contraseña | Hay que crearle un acceso nuevo desde Terminal; llama a soporte |
+| Olvidó la contraseña | Ver **Olvidó la contraseña** abajo |
 | No llegan noticias | Revisa la conexión a internet y espera unos minutos; el registro está en `Folio2/logs/folio.log` |
+
+### Olvidó la contraseña
+
+1. Cierra Folio: **Ajustes → Cerrar Folio**.
+2. Abre **Terminal** (Spotlight: escribe "Terminal").
+3. Pega esta línea, con su correo y la contraseña nueva (mínimo 10 caracteres) dentro de las comillas, y pulsa Enter:
+
+```
+FOLIO_PASSWORD='contraseña-nueva-aquí' /Applications/Folio.app/Contents/MacOS/Folio user reset correo@ejemplo.com
+```
+
+4. Debe decir `contraseña cambiada para correo@ejemplo.com`. Si dice `no existe el usuario`, el correo está mal escrito; los correos registrados se ven con la misma línea cambiando `user reset correo@ejemplo.com` por `user list` (sin `FOLIO_PASSWORD`).
+5. Abre Folio y entra con la contraseña nueva. Las sesiones que tuviera abiertas se cierran.
+
+Si prefieres no escribir la contraseña en la línea, quita `FOLIO_PASSWORD='…'` y Folio la pide dos veces sin mostrarla.

@@ -246,6 +246,10 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 			// PR-relevance filter: US/Federal/Global articles must relate to Puerto Rico.
 			if region != "PR" && region != "Grants" {
 				textForCheck := title + " " + cleanText
+				if isOtherPuertoRico(textForCheck) {
+					slog.Debug("ingestion: another Puerto Rico (Misiones/football), skipping", "title", truncate(title, 60))
+					continue
+				}
 				if !isPRRelevant(textForCheck) {
 					slog.Debug("ingestion: US article not PR-related (keywords), skipping", "title", truncate(title, 60))
 					continue
@@ -554,6 +558,40 @@ var prKeywords = []string{
 	"estado libre asociado",
 	// "territory", "territorial", "statehood" y "commonwealth" se quitaron:
 	// solos traen ruido (Commonwealth of Virginia, Northern Territory, etc.).
+}
+
+// otherPuertoRico: frases (en minúsculas y sin acentos) de lugares y clubes que
+// se llaman «Puerto Rico» fuera de la isla: el municipio de Misiones
+// (Argentina) y clubes de fútbol de otros países. Solo se aplica a noticias de
+// regiones US/Global; las fuentes de PR no pasan por aquí. No se usa «misiones»
+// a secas: en español también es «missions».
+var otherPuertoRico = []string{
+	"puerto rico, misiones",
+	"puerto rico (misiones)",
+	"puerto rico misiones",
+	"puerto rico, argentina",
+	"puerto rico - misiones",
+	"misiones, argentina",
+	"provincia de misiones",
+	"club puerto rico",
+	"deportivo puerto rico",
+	"atletico puerto rico",
+	"club atletico puerto rico",
+	"puerto rico fc",
+	"puerto rico f.c.",
+}
+
+var foldAccents = strings.NewReplacer("á", "a", "é", "e", "í", "i", "ó", "o", "ú", "u", "ü", "u")
+
+// isOtherPuertoRico dice si el texto habla de un «Puerto Rico» que no es la isla.
+func isOtherPuertoRico(text string) bool {
+	lower := foldAccents.Replace(strings.ToLower(text))
+	for _, p := range otherPuertoRico {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // isPRRelevant does a fast keyword check to see if text mentions Puerto Rico.

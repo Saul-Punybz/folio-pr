@@ -21,11 +21,13 @@ Nunca toques `Folio` ni `Folio2` de la usuaria real.
 
 - `cmd/folio`: `main.go` (servidor), `app.go` (modo app: Postgres embebido, 127.0.0.1:47615),
   `cron.go` (tareas con candado; cadena de fondos crawl → extracción → Grants.gov → estados),
-  `router.go`, `user.go` (`folio user add|list`; sin `DB_*` usa el Postgres embebido).
+  `router.go`, `user.go` (`folio user add|reset|list`; sin `DB_*` usa el Postgres embebido).
 - `internal/crawler`: FolioBot (`FolioBot/1.0`), robots.txt y ≥1 s por host, PDF a
   `<datos>/documentos/<sha256>.pdf`, listados partidos en filas (`rows.go`), huella
   de deduplicado (`dedupe.go`), extracción (`extraction.go`), Grants.gov (`grantsgov.go`).
 - `internal/extract`: patrones de convocatorias; único parser de montos (`AmountCents`).
+- `internal/podcasts`: episodios de Apple Podcasts para Marcas (`watch.ScanPodcasts`, fuente `podcast`).
+- `internal/gdelt`: cliente listo pero **apagado** (no está en el cron ni en el escaneo): 0 resultados para las marcas y límite de 1 petición cada 5 s.
 - `internal/pdftext`, `internal/robots`, `internal/grants`, `internal/embeddb`.
 - Migraciones en `migrations/`, en orden por nombre, embebidas y aplicadas al arrancar.
 

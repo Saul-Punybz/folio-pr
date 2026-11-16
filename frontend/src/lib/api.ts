@@ -125,7 +125,7 @@ export interface WatchlistHit {
   id: string;
   org_id: string;
   org_name: string;
-  source_type: 'google_news' | 'bing_news' | 'web' | 'local' | 'youtube' | 'reddit' | 'bluesky' | 'sitio' | 'mastodon' | 'alertas';
+  source_type: 'google_news' | 'bing_news' | 'web' | 'local' | 'youtube' | 'reddit' | 'bluesky' | 'sitio' | 'mastodon' | 'alertas' | 'podcast';
   network: string;
   matched_hashtag: string;
   matched_person: string;

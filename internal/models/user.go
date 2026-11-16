@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -69,6 +71,32 @@ func (s *UserStore) SetPassword(ctx context.Context, email, passwordHash, role s
 		return fmt.Errorf("user not found: %s", email)
 	}
 	return nil
+}
+
+// ResetPassword cambia la contraseña de un usuario (sin tocar su rol) y cierra
+// todas sus sesiones abiertas, en una sola transacción. found=false si no existe.
+func (s *UserStore) ResetPassword(ctx context.Context, email, passwordHash string) (found bool, err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("user reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var id uuid.UUID
+	err = tx.QueryRow(ctx, `UPDATE users SET password_hash = $2 WHERE lower(email) = lower($1) RETURNING id`,
+		email, passwordHash).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("user reset: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, id); err != nil {
+		return false, fmt.Errorf("user reset sessions: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("user reset: %w", err)
+	}
+	return true, nil
 }
 
 // GetByEmail returns a user by their email address.

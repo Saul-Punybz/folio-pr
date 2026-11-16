@@ -18,6 +18,7 @@ const (
 	KindArticulo = "articulo"
 	KindPost     = "post"
 	KindVideo    = "video"
+	KindPodcast  = "podcast"
 )
 
 // KindFor da el tipo de cita de una fuente de Folio.
@@ -25,6 +26,8 @@ func KindFor(sourceType string) string {
 	switch sourceType {
 	case "youtube":
 		return KindVideo
+	case "podcast":
+		return KindPodcast
 	case "bluesky", "mastodon":
 		return KindPost
 	default:
@@ -43,6 +46,8 @@ func PlatformFor(sourceType string) string {
 		return "Mastodon"
 	case "reddit":
 		return "Reddit"
+	case "podcast":
+		return "Apple Podcasts"
 	}
 	return ""
 }
@@ -57,7 +62,7 @@ type Meta struct {
 	Published *time.Time
 	URL       string
 	Text      string // texto del post (para KindPost)
-	Platform  string // «Bluesky», «Mastodon», «YouTube»
+	Platform  string // «Bluesky», «Mastodon», «YouTube», «Apple Podcasts»
 }
 
 // Cita es la referencia APA en dos formas: texto plano (sin cursiva) y
@@ -139,6 +144,8 @@ func endDot(s string) string {
 //	sin fecha:          (s. f.)
 //	post:               Autor [@usuario]. (fecha). *Primeras 20 palabras…* [Publicación]. Plataforma. URL
 //	video:              Canal. (fecha). *Título* [Video]. YouTube. URL
+//	podcast:            Título [Episodio de pódcast]. (fecha). En *Programa*. Apple Podcasts. URL
+//	                    (con anfitrión: Anfitrión. (fecha). Título [Episodio de pódcast]. En …)
 func APA(m Meta) Cita {
 	title := collapse(m.Title)
 	site := collapse(m.Site)
@@ -164,6 +171,24 @@ func APA(m Meta) Cita {
 		b.add(" [Publicación]. ")
 		plat := firstNonEmpty(m.Platform, site)
 		if plat != "" {
+			b.add(endDot(plat) + " ")
+		}
+	case KindPodcast:
+		if title == "" {
+			title = "(sin título)"
+		}
+		ep := strings.TrimRight(title, ". ") + " [Episodio de pódcast]. "
+		if authors := FormatAuthors(m.Authors); authors != "" {
+			b.add(endDot(authors) + " " + date + ". " + ep)
+		} else {
+			b.add(ep + date + ". ")
+		}
+		if site != "" {
+			b.add("En ")
+			b.italic(strings.TrimRight(site, ". "))
+			b.add(". ")
+		}
+		if plat := firstNonEmpty(m.Platform); plat != "" {
 			b.add(endDot(plat) + " ")
 		}
 	case KindVideo:

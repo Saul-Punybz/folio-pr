@@ -14,6 +14,7 @@ const REDES: { key: string; label: string }[] = [
   { key: 'bluesky', label: SOURCE_LABELS.bluesky },
   { key: 'mastodon', label: SOURCE_LABELS.mastodon },
   { key: 'reddit', label: SOURCE_LABELS.reddit },
+  { key: 'podcast', label: SOURCE_LABELS.podcast },
 ];
 
 export default function ArchivoMarca({ orgId, name, onBack }: { orgId: string; name: string; onBack: () => void }) {

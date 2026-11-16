@@ -16,6 +16,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   bluesky: 'Bluesky',
   mastodon: 'Mastodon',
   reddit: 'Reddit',
+  podcast: 'Podcast',
 };
 
 const ESTADO: Record<string, { label: string; cls: string }> = {

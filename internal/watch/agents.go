@@ -100,6 +100,7 @@ func scanOrg(ctx context.Context, org models.WatchlistOrg, all []models.Watchlis
 	}
 	hits += ScanReddit(ctx, org, queries, m, deps)
 	hits += ScanAlerts(ctx, org, m, deps)
+	hits += ScanPodcasts(ctx, org, deps)
 	if org.IsBrand() {
 		hits += ScanBluesky(ctx, org, m, deps)
 		hits += ScanMastodon(ctx, org, m, deps)

@@ -81,6 +81,7 @@ const usage = `uso:
   folio                                 servir (HTTP + cron)
   folio app                             modo app (Postgres embebido, 127.0.0.1:47615, abre el navegador)
   folio user add <email> [admin|member] crear/actualizar usuario (contraseña en FOLIO_PASSWORD o stdin)
+  folio user reset <email>              nueva contraseña (FOLIO_PASSWORD o stdin) y cierra sus sesiones
   folio user list                       listar usuarios`
 
 // connect abre el pool y aplica las migraciones embebidas.

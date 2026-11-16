@@ -23,7 +23,7 @@ import (
 
 const minPasswordLen = handlers.MinPasswordLen
 
-// userCommand atiende `folio user add|list`.
+// userCommand atiende `folio user add|reset|list`.
 func userCommand(args []string) error {
 	if len(args) == 0 {
 		return errors.New(usage)
@@ -87,6 +87,34 @@ func userCommand(args []string) error {
 		fmt.Printf("usuario creado: %s (%s)\n", email, role)
 		return nil
 
+	case "reset":
+		if len(args) != 2 {
+			return errors.New("uso: folio user reset <email>")
+		}
+		email := models.NormalizeEmail(args[1])
+		if !strings.Contains(email, "@") {
+			return fmt.Errorf("email inválido: %q", args[1])
+		}
+		password, err := readPassword()
+		if err != nil {
+			return err
+		}
+		cfg, cleanup, err := userDB()
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		pool, err := connect(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+		if err := resetUserPassword(ctx, models.NewUserStore(pool), email, password); err != nil {
+			return err
+		}
+		fmt.Printf("contraseña cambiada para %s; sus sesiones abiertas se cerraron\n", email)
+		return nil
+
 	case "list":
 		cfg, cleanup, err := userDB()
 		if err != nil {
@@ -112,6 +140,26 @@ func userCommand(args []string) error {
 	default:
 		return errors.New(usage)
 	}
+}
+
+// resetUserPassword valida la contraseña nueva, la guarda y cierra las
+// sesiones del usuario. Error claro si el correo no existe.
+func resetUserPassword(ctx context.Context, users *models.UserStore, email, password string) error {
+	if len([]rune(password)) < minPasswordLen {
+		return fmt.Errorf("la contraseña debe tener al menos %d caracteres", minPasswordLen)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash: %w", err)
+	}
+	found, err := users.ResetPassword(ctx, email, string(hash))
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("no existe el usuario %s (mira los correos con: folio user list)", email)
+	}
+	return nil
 }
 
 // userDB elige la base para `folio user`:
