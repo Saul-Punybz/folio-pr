@@ -32,8 +32,9 @@ type Item struct {
 
 // Client consulta Grants.gov.
 type Client struct {
-	client   *http.Client
-	endpoint string
+	client         *http.Client
+	endpoint       string
+	detailEndpoint string
 }
 
 // New crea un Client. Con client nil usa uno con timeout de 20 s.
@@ -41,7 +42,7 @@ func New(client *http.Client) *Client {
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
-	return &Client{client: client, endpoint: defaultEndpoint}
+	return &Client{client: client, endpoint: defaultEndpoint, detailEndpoint: defaultDetailEndpoint}
 }
 
 type response struct {

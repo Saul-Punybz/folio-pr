@@ -1,0 +1,111 @@
+{
+ "errorcode": 0,
+ "msg": "Webservice Succeeds",
+ "data": {
+  "searchParams": {
+   "resultType": "json",
+   "searchOnly": false,
+   "oppNum": "",
+   "cfda": "",
+   "sortBy": "closeDate|asc",
+   "oppStatuses": "forecasted|posted",
+   "startRecordNum": 0,
+   "eligibilities": "12|13|25|99",
+   "fundingInstruments": "",
+   "fundingCategories": "",
+   "agencies": "",
+   "rows": 6,
+   "keyword": "youth",
+   "keywordEncoded": true
+  },
+  "hitCount": 77,
+  "startRecord": 0,
+  "oppHits": [
+   {
+    "id": "364040",
+    "number": "O-OJJDP-2026-172737",
+    "title": "OJJDP FY 2026 Expanding Youth Access to Community-Based Treatment",
+    "agencyCode": "USDOJ-OJP-OJJDP",
+    "agency": "Office of Juvenile Justice Delinquency Prevention ",
+    "openDate": "10/08/2026",
+    "closeDate": "11/16/2026",
+    "oppStatus": "posted",
+    "docType": "synopsis",
+    "cfdaList": [
+     "16.838"
+    ]
+   },
+   {
+    "id": "364058",
+    "number": "O-OJJDP-2026-172743",
+    "title": "OJJDP FY 2026 Mentoring for Youth Impacted by Opioids and Other Substance Use",
+    "agencyCode": "USDOJ-OJP-OJJDP",
+    "agency": "Office of Juvenile Justice Delinquency Prevention ",
+    "openDate": "10/09/2026",
+    "closeDate": "11/16/2026",
+    "oppStatus": "posted",
+    "docType": "synopsis",
+    "cfdaList": [
+     "16.726"
+    ]
+   },
+   {
+    "id": "364057",
+    "number": "O-OJJDP-2026-172748",
+    "title": "OJJDP FY 2026 Opioid Affected Youth Initiative",
+    "agencyCode": "USDOJ-OJP-OJJDP",
+    "agency": "Office of Juvenile Justice Delinquency Prevention ",
+    "openDate": "10/09/2026",
+    "closeDate": "11/16/2026",
+    "oppStatus": "posted",
+    "docType": "synopsis",
+    "cfdaList": [
+     "16.842"
+    ]
+   },
+   {
+    "id": "361604",
+    "number": "26-507",
+    "title": "National Science Foundation Fostering Interdisciplinary Networks to Develop Emergent and Responsive Solutions Foundry (NSF FINDERS FOUNDRY)",
+    "agencyCode": "NSF",
+    "agency": "U.S. National Science Foundation",
+    "openDate": "03/23/2026",
+    "closeDate": "11/18/2026",
+    "oppStatus": "posted",
+    "docType": "synopsis",
+    "cfdaList": [
+     "47.076",
+     "47.084"
+    ]
+   },
+   {
+    "id": "363047",
+    "number": "HHS-2026-ACF-ECD-TP-0039",
+    "title": "Preschool Development Grant Birth Through Five (PDG B-5) SMART Grant",
+    "agencyCode": "HHS-ACF",
+    "agency": "Administration for Children and Families",
+    "openDate": "09/21/2026",
+    "closeDate": "11/20/2026",
+    "oppStatus": "posted",
+    "docType": "synopsis",
+    "cfdaList": [
+     "93.434"
+    ]
+   },
+   {
+    "id": "363846",
+    "number": "USDA-NIFA-HSI-011903",
+    "title": "Hispanic-Serving Institutions Education Grants Program",
+    "agencyCode": "USDA-NIFA",
+    "agency": "National Institute of Food and Agriculture",
+    "openDate": "09/10/2026",
+    "closeDate": "12/03/2026",
+    "oppStatus": "posted",
+    "docType": "synopsis",
+    "cfdaList": [
+     "10.223"
+    ]
+   }
+  ]
+ }
+}

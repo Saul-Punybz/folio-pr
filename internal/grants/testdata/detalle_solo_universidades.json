@@ -1,0 +1,162 @@
+{
+ "errorcode": 0,
+ "msg": "Webservice Succeeds",
+ "data": {
+  "id": 358090,
+  "revision": 0,
+  "opportunityNumber": "RFA-AT-25-003",
+  "opportunityTitle": "HEAL Initiative: Pain Research Enhancement Program (PREP) (R15 Clinical Trial Optional)",
+  "owningAgencyCode": "HHS-NIH11",
+  "listed": "L",
+  "flag2006": "N",
+  "opportunityCategory": {
+   "category": "D",
+   "description": "Discretionary"
+  },
+  "synopsis": {
+   "opportunityId": 358090,
+   "version": 1,
+   "agencyCode": "HHS-NIH11",
+   "agencyName": "National Institutes of Health",
+   "agencyDetails": {
+    "code": "NIH",
+    "seed": "HHS-NIH11",
+    "agencyName": "National Institutes of Health",
+    "agencyCode": "HHS-NIH11",
+    "topAgencyCode": "HHS"
+   },
+   "topAgencyDetails": {
+    "code": "HHS",
+    "seed": "HHS",
+    "agencyName": "Department of Health and Human Services",
+    "agencyCode": "HHS",
+    "topAgencyCode": "HHS"
+   },
+   "synopsisDesc": "The purpose of this initiative is to: (1) support the efforts by R15-eligible Principal Investigators (PIs) to conduct rigorous basic and/or mechanistic pain research projects; (2) promote integrated, interdisciplinary research partnerships between R15-eligible PIs and additional investigators from U.S. domestic institutions, and (3) enhance the pain research environment at the R15-eligible institution for health professional trainees or undergraduate and/or graduate students by actively engaging them in the proposed pain research projects.",
+   "responseDate": "Nov 23, 2026 12:00:00 AM EST",
+   "responseDateDesc": "",
+   "fundingDescLinkUrl": "http://grants.nih.gov/grants/guide/rfa-files/RFA-AT-25-003.html",
+   "fundingDescLinkDesc": "https://grants.nih.gov/grants/guide/rfa-files/RFA-AT-25-003.html",
+   "postingDate": "Jan 08, 2025 12:00:00 AM EST",
+   "archiveDate": "Dec 29, 2026 12:00:00 AM EST",
+   "costSharing": false,
+   "awardCeiling": "375000",
+   "awardCeilingFormatted": "375,000",
+   "awardFloor": "none",
+   "applicantEligibilityDesc": "Other Eligible Applicants include the following:\n Alaska Native and Native Hawaiian Serving Institutions; Asian American Native American Pacific Islander Serving Institutions (AANAPISISs); Hispanic-serving Institutions; Historically Black Colleges and Universities (HBCUs); Tribally Controlled Colleges and Universities (TCCUs) ; Non-domestic (non-U.S.) Entities (Foreign Organizations) are not eligible to apply.\n\nNon-domestic (non-U.S.) components of U.S. Organizations are not eligible to apply.\n\nForeign components, as defined in the NIH Grants Policy Statement, are allowed.",
+   "createTimeStamp": "Jan 08, 2025 02:35:49 PM EST",
+   "createdDate": "Jan 08, 2025 02:19:34 PM EST",
+   "lastUpdatedDate": "Jan 08, 2025 02:19:34 PM EST",
+   "applicantTypes": [
+    {
+     "id": "20",
+     "description": "Private institutions of higher education"
+    },
+    {
+     "id": "25",
+     "description": "Others (see text field entitled \"Additional Information on Eligibility\" for clarification)"
+    },
+    {
+     "id": "06",
+     "description": "Public and State controlled institutions of higher education"
+    }
+   ],
+   "fundingInstruments": [
+    {
+     "id": "G",
+     "description": "Grant"
+    }
+   ],
+   "fundingActivityCategories": [
+    {
+     "id": "HL",
+     "description": "Health"
+    },
+    {
+     "id": "ISS",
+     "description": "Income Security and Social Services"
+    }
+   ],
+   "responseDateStr": "2026-11-23-00-00-00",
+   "postingDateStr": "2025-01-08-00-00-00",
+   "archiveDateStr": "2026-12-29-00-00-00",
+   "createTimeStampStr": "2025-01-08-14-35-49"
+  },
+  "agencyDetails": {
+   "code": "NIH",
+   "seed": "HHS-NIH11",
+   "agencyName": "National Institutes of Health",
+   "agencyCode": "HHS-NIH11",
+   "topAgencyCode": "HHS"
+  },
+  "topAgencyDetails": {
+   "code": "HHS",
+   "seed": "HHS",
+   "agencyName": "Department of Health and Human Services",
+   "agencyCode": "HHS",
+   "topAgencyCode": "HHS"
+  },
+  "cfdas": [
+   {
+    "id": 427056,
+    "opportunityId": 358090,
+    "cfdaNumber": "93.121",
+    "programTitle": "Oral Diseases and Disorders Research"
+   },
+   {
+    "id": 427055,
+    "opportunityId": 358090,
+    "cfdaNumber": "93.213",
+    "programTitle": "Research and Training in Complementary and Integrative Health"
+   },
+   {
+    "id": 427059,
+    "opportunityId": 358090,
+    "cfdaNumber": "93.273",
+    "programTitle": "Alcohol Research Programs"
+   },
+   {
+    "id": 427057,
+    "opportunityId": 358090,
+    "cfdaNumber": "93.846",
+    "programTitle": "Arthritis, Musculoskeletal and Skin Diseases Research"
+   },
+   {
+    "id": 427058,
+    "opportunityId": 358090,
+    "cfdaNumber": "93.853",
+    "programTitle": "Extramural Research Programs in the Neurosciences and Neurological Disorders"
+   },
+   {
+    "id": 427060,
+    "opportunityId": 358090,
+    "cfdaNumber": "93.865",
+    "programTitle": "Child Health and Human Development Extramural Research"
+   },
+   {
+    "id": 427054,
+    "opportunityId": 358090,
+    "cfdaNumber": "93.866",
+    "programTitle": "Aging Research"
+   },
+   {
+    "id": 427061,
+    "opportunityId": 358090
+   }
+  ],
+  "originalDueDate": "Nov 23, 2026 12:00:00 AM EST",
+  "originalDueDateDesc": "",
+  "synopsisModifiedFields": [],
+  "forecastModifiedFields": [],
+  "errorMessages": [],
+  "synPostDateInPast": true,
+  "docType": "synopsis",
+  "forecastHistCount": 0,
+  "synopsisHistCount": 0,
+  "assistCompatible": false,
+  "assistURL": "",
+  "relatedOpps": [],
+  "draftMode": "N",
+  "ost": "POSTED"
+ }
+}

@@ -1,0 +1,153 @@
+{
+ "errorcode": 0,
+ "msg": "Webservice Succeeds",
+ "data": {
+  "id": 355824,
+  "revision": 6,
+  "opportunityNumber": "MP-CPI-25-001",
+  "opportunityTitle": "Making America Healthy Again by Addressing Dementia Disparities",
+  "owningAgencyCode": "HHS-OPHS",
+  "listed": "L",
+  "modifiedComments": "Title revision",
+  "flag2006": "N",
+  "opportunityCategory": {
+   "category": "D",
+   "description": "Discretionary"
+  },
+  "agencyDetails": {
+   "code": "OPHS",
+   "seed": "HHS-OPHS",
+   "agencyName": "Office of the Assistant Secretary for Health",
+   "agencyCode": "HHS-OPHS",
+   "topAgencyCode": "HHS"
+  },
+  "topAgencyDetails": {
+   "code": "HHS",
+   "seed": "HHS",
+   "agencyName": "Department of Health and Human Services",
+   "agencyCode": "HHS",
+   "topAgencyCode": "HHS"
+  },
+  "forecast": {
+   "opportunityId": 355824,
+   "version": 7,
+   "postingDate": "Aug 01, 2024 12:00:00 AM EDT",
+   "forecastDesc": "The Office of Minority Health announces the anticipated availability of funds for Fiscal Year (FY) 2025 under the authority of 42 U.S.C. § 300u-6 (Section 1707 of the Public Health Service Act) for demonstration projects to support innovative evidence-based/informed and community-focused approaches that reduce disparities impacting brain health as people age. Demonstration projects are time-limited projects for the purpose of assessing the effectiveness of an approach or intervention toward reaching a desired outcome. We expect award recipients under this opportunity to consider approaches to sustainability beyond the end of the support provided by OMH.     Subjective cognitive decline (SCD) is self-reported confusion or memory loss and an early sign of Alzheimer's disease and dementia. Groups disproportionately affected by dementia and related chronic illnesses may face barriers to health care and social services that increase their risk of poor health outcomes. Projects funded under the initiative will use novel community-based strategies that address social determinants of health (SDOH) and risk factors in the environments where people live, work, learn play and worship. We intend for projects to reduce health disparities and demonstrate progress towards SCD-related Healthy People 2030 objectives. See https://health.gov/healthypeople/objectives-and-data/browse-objectives/dementias for more information. This initiative is in alignment with Make America Healthy Again Commiss",
+   "costSharing": false,
+   "numberOfAwards": "9",
+   "estimatedFunding": "5000000",
+   "awardCeiling": "600000",
+   "awardFloor": "450000",
+   "agencyCode": "HHS-OPHS",
+   "sendEmail": "Y",
+   "estSynopsisPostingDate": "Apr 14, 2025 12:00:00 AM EDT",
+   "estApplicationResponseDate": "Jun 23, 2025 12:00:00 AM EDT",
+   "estApplicationResponseDateDesc": "Applications must be submitted electronically no later than 6:00 pm Eastern Time.",
+   "estAwardDate": "Sep 15, 2025 12:00:00 AM EDT",
+   "estProjectStartDate": "Sep 30, 2025 12:00:00 AM EDT",
+   "fiscalYear": 2025,
+   "modComments": "Title revision",
+   "createTimeStamp": "Mar 20, 2025 10:28:30 AM EDT",
+   "createdDate": "Aug 01, 2024 03:26:32 PM EDT",
+   "lastUpdatedDate": "Mar 20, 2025 10:28:30 AM EDT",
+   "agencyDetails": {
+    "code": "OPHS",
+    "seed": "HHS-OPHS",
+    "agencyName": "Office of the Assistant Secretary for Health",
+    "agencyCode": "HHS-OPHS",
+    "topAgencyCode": "HHS"
+   },
+   "estimatedFundingFormatted": "5,000,000",
+   "awardCeilingFormatted": "600,000",
+   "awardFloorFormatted": "450,000",
+   "applicantTypes": [
+    {
+     "id": "07",
+     "description": "Native American tribal governments (Federally recognized)"
+    },
+    {
+     "id": "00",
+     "description": "State governments"
+    },
+    {
+     "id": "01",
+     "description": "County governments"
+    },
+    {
+     "id": "04",
+     "description": "Special district governments"
+    },
+    {
+     "id": "13",
+     "description": "Nonprofits that do not have a 501(c)(3) status with the IRS, other than institutions of higher education"
+    },
+    {
+     "id": "11",
+     "description": "Native American tribal organizations (other than Federally recognized tribal governments)"
+    },
+    {
+     "id": "02",
+     "description": "City or township governments"
+    },
+    {
+     "id": "08",
+     "description": "Public housing authorities/Indian housing authorities"
+    },
+    {
+     "id": "05",
+     "description": "Independent school districts"
+    },
+    {
+     "id": "06",
+     "description": "Public and State controlled institutions of higher education"
+    },
+    {
+     "id": "12",
+     "description": "Nonprofits having a 501(c)(3) status with the IRS, other than institutions of higher education"
+    }
+   ],
+   "fundingInstruments": [
+    {
+     "id": "G",
+     "description": "Grant"
+    }
+   ],
+   "fundingActivityCategories": [
+    {
+     "id": "HL",
+     "description": "Health"
+    }
+   ],
+   "postingDateStr": "2024-08-01-00-00-00",
+   "estSynopsisPostingDateStr": "2025-04-14-00-00-00",
+   "estApplicationResponseDateStr": "2025-06-23-00-00-00",
+   "estAwardDateStr": "2025-09-15-00-00-00",
+   "estProjectStartDateStr": "2025-09-30-00-00-00",
+   "createTimeStampStr": "2025-03-20-10-28-30"
+  },
+  "cfdas": [
+   {
+    "id": 422868,
+    "opportunityId": 355824,
+    "cfdaNumber": "93.137",
+    "programTitle": "Community Programs to Improve Minority Health"
+   }
+  ],
+  "synopsisModifiedFields": [],
+  "forecastModifiedFields": [
+   "revision",
+   "version",
+   "opportunityTitle"
+  ],
+  "errorMessages": [],
+  "synPostDateInPast": true,
+  "docType": "forecast",
+  "forecastHistCount": 6,
+  "synopsisHistCount": 0,
+  "assistCompatible": false,
+  "assistURL": "",
+  "relatedOpps": [],
+  "draftMode": "N",
+  "ost": "FORECASTED"
+ }
+}

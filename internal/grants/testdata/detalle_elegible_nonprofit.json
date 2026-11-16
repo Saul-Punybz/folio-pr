@@ -1,0 +1,146 @@
+{
+ "errorcode": 0,
+ "msg": "Webservice Succeeds",
+ "data": {
+  "id": 364058,
+  "revision": 0,
+  "opportunityNumber": "O-OJJDP-2026-172743",
+  "opportunityTitle": "OJJDP FY 2026 Mentoring for Youth Impacted by Opioids and Other Substance Use",
+  "owningAgencyCode": "USDOJ-OJP-OJJDP",
+  "listed": "L",
+  "flag2006": "N",
+  "opportunityCategory": {
+   "category": "D",
+   "description": "Discretionary"
+  },
+  "synopsis": {
+   "opportunityId": 364058,
+   "version": 1,
+   "agencyCode": "USDOJ-OJP-OJJDP",
+   "agencyName": "Office of Juvenile Justice Delinquency Prevention",
+   "agencyDetails": {
+    "code": "OJJDP",
+    "seed": "USDOJ-OJP-OJJDP",
+    "agencyName": "Office of Juvenile Justice Delinquency Prevention ",
+    "agencyCode": "USDOJ-OJP-OJJDP",
+    "topAgencyCode": "USDOJ"
+   },
+   "topAgencyDetails": {
+    "code": "USDOJ",
+    "seed": "USDOJ",
+    "agencyName": "Department of Justice",
+    "agencyCode": "USDOJ",
+    "topAgencyCode": "USDOJ"
+   },
+   "synopsisDesc": "This is a notice of funding opportunity (NOFO) for the OJJDP FY 2026 Mentoring for Youth Impacted by Opioids and Other Substance Use program. This opportunity supports the implementation and delivery of high-quality mentoring services for youth who are currently using or dependent on substances, as well as youth at risk of substance use or who have close family members experiencing substance use or dependency. Mentoring services may include one-on-one, group, or peer mentoring—or a combination of these approaches or hybrid (traditional in-person combined with virtual mentoring).",
+   "responseDate": "Nov 16, 2026 12:00:00 AM EST",
+   "fundingDescLinkUrl": "https://www.ojp.gov/funding/docs/ojjdp-2026-172743.pdf",
+   "fundingDescLinkDesc": "Full Announcement",
+   "postingDate": "Oct 09, 2026 12:00:00 AM EDT",
+   "costSharing": false,
+   "numberOfAwards": "15",
+   "estimatedFunding": "16500000",
+   "estimatedFundingFormatted": "16,500,000",
+   "awardCeiling": "2000000",
+   "awardCeilingFormatted": "2,000,000",
+   "awardFloor": "0",
+   "awardFloorFormatted": "0",
+   "applicantEligibilityDesc": "Units of local government; National organizations; Organizations having statewide reach that provide mentoring services",
+   "createTimeStamp": "Oct 09, 2026 02:34:59 PM EDT",
+   "createdDate": "Oct 09, 2026 02:34:59 PM EDT",
+   "lastUpdatedDate": "Oct 09, 2026 02:34:59 PM EDT",
+   "applicantTypes": [
+    {
+     "id": "05",
+     "description": "Independent school districts"
+    },
+    {
+     "id": "00",
+     "description": "State governments"
+    },
+    {
+     "id": "02",
+     "description": "City or township governments"
+    },
+    {
+     "id": "01",
+     "description": "County governments"
+    },
+    {
+     "id": "12",
+     "description": "Nonprofits having a 501(c)(3) status with the IRS, other than institutions of higher education"
+    },
+    {
+     "id": "13",
+     "description": "Nonprofits that do not have a 501(c)(3) status with the IRS, other than institutions of higher education"
+    },
+    {
+     "id": "06",
+     "description": "Public and State controlled institutions of higher education"
+    },
+    {
+     "id": "07",
+     "description": "Native American tribal governments (Federally recognized)"
+    },
+    {
+     "id": "25",
+     "description": "Others (see text field entitled \"Additional Information on Eligibility\" for clarification)"
+    },
+    {
+     "id": "20",
+     "description": "Private institutions of higher education"
+    }
+   ],
+   "fundingInstruments": [
+    {
+     "id": "G",
+     "description": "Grant"
+    }
+   ],
+   "fundingActivityCategories": [
+    {
+     "id": "LJL",
+     "description": "Law, Justice and Legal Services"
+    }
+   ],
+   "responseDateStr": "2026-11-16-00-00-00",
+   "postingDateStr": "2026-10-09-00-00-00",
+   "createTimeStampStr": "2026-10-09-14-34-59"
+  },
+  "agencyDetails": {
+   "code": "OJJDP",
+   "seed": "USDOJ-OJP-OJJDP",
+   "agencyName": "Office of Juvenile Justice Delinquency Prevention ",
+   "agencyCode": "USDOJ-OJP-OJJDP",
+   "topAgencyCode": "USDOJ"
+  },
+  "topAgencyDetails": {
+   "code": "USDOJ",
+   "seed": "USDOJ",
+   "agencyName": "Department of Justice",
+   "agencyCode": "USDOJ",
+   "topAgencyCode": "USDOJ"
+  },
+  "cfdas": [
+   {
+    "id": 435740,
+    "opportunityId": 364058,
+    "cfdaNumber": "16.726",
+    "programTitle": "Juvenile Mentoring Program"
+   }
+  ],
+  "originalDueDate": "Nov 16, 2026 12:00:00 AM EST",
+  "synopsisModifiedFields": [],
+  "forecastModifiedFields": [],
+  "errorMessages": [],
+  "synPostDateInPast": true,
+  "docType": "synopsis",
+  "forecastHistCount": 0,
+  "synopsisHistCount": 0,
+  "assistCompatible": false,
+  "assistURL": "",
+  "relatedOpps": [],
+  "draftMode": "N",
+  "ost": "POSTED"
+ }
+}

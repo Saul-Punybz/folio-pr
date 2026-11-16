@@ -1,0 +1,114 @@
+{
+ "errorcode": 0,
+ "msg": "Webservice Succeeds",
+ "data": {
+  "id": 362842,
+  "revision": 3,
+  "opportunityNumber": "2026-NTIA-NEGP",
+  "opportunityTitle": "Native Entities Grant Program",
+  "owningAgencyCode": "DOC-DOCNISTERA",
+  "listed": "L",
+  "flag2006": "N",
+  "opportunityCategory": {
+   "category": "D",
+   "description": "Discretionary"
+  },
+  "synopsis": {
+   "opportunityId": 362842,
+   "version": 8,
+   "agencyCode": "DOC-DOCNISTERA",
+   "agencyName": "Misty L Roosa\nGrantor",
+   "agencyDetails": {
+    "code": "DOCNISTERA",
+    "seed": "DOC-DOCNISTERA",
+    "agencyName": "DOC NIST ERA",
+    "agencyCode": "DOC-DOCNISTERA",
+    "topAgencyCode": "DOC"
+   },
+   "topAgencyDetails": {
+    "code": "DOC",
+    "seed": "DOC",
+    "agencyName": "Department of Commerce",
+    "agencyCode": "DOC",
+    "topAgencyCode": "DOC"
+   },
+   "synopsisDesc": "<p><span style=\"color: black;\">NTIA is soliciting applications for the Native Entities Grant Program (“Program”), authorized by the Infrastructure Investment and Jobs Act of 2021, Division F, Title III, Public Law 117-58, 135 Stat. 429, 1209 (November 15, 2021) (codified at 47 U.S.C. §1701, 1721, et seq.) (the “Digital Equity Act of 2021” or “Act”). The Act authorizes two programs that set aside funds for Indian Tribes, Alaska Native entities, and Native Hawaiian organizations (collectively “Native Entities”): the “State Digital Equity Capacity Grant Program” and the “Digital Equity Competitive Grant Program.” To reduce administrative burden and cost, NTIA is releasing the funds for both programs through a single application process.</span></p> \n<p><br></p> \n<p><span style=\"color: black;\">Applicants should visit BroadbandUSA to download the NEGP-specific application forms in addition to those standard forms available for download on grants.gov.</span></p> \n<p><span style=\"color: black;\">&nbsp;</span></p> \n<p><a href=\"https://gcc02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fbroadbandusa.ntia.gov%2Ffunding-programs%2Fnative-entities-grant-program&amp;data=05%7C02%7Cmisty.roosa%40nist.gov%7C59b359eecd784fdcbce808df1fbe7a85%7C2ab5d82fd8fa4797a93e054655c61dec%7C0%7C0%7C639264575533689598%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&amp;sdata=qhd9DF4mWc5U41Lk7ga0Fmx1rAaQzwJBl0G3uOONuuY%3D&",
+   "responseDate": "Nov 17, 2026 12:00:00 AM EST",
+   "responseDateDesc": "",
+   "postingDate": "Jun 17, 2026 12:00:00 AM EDT",
+   "archiveDate": "Dec 17, 2026 12:00:00 AM EST",
+   "costSharing": true,
+   "numberOfAwards": "100",
+   "awardCeiling": "none",
+   "awardFloor": "none",
+   "applicantEligibilityDesc": "The following entities are eligible to receive grants under the Native Entities Grant Program: 1. An Indian Tribe, an Alaska Native entity, or a Native Hawaiian organization (&ldquo;Native Entity&rdquo;); or 2. A partnership between Eligible Entities (&ldquo;Consortium&rdquo;). See Section III of this NOFO for additional information concerning the eligibility requirements for this program.",
+   "sendEmail": "N",
+   "createTimeStamp": "Oct 01, 2026 09:30:22 AM EDT",
+   "modComments": "Added link",
+   "createdDate": "Jun 17, 2026 11:37:53 AM EDT",
+   "lastUpdatedDate": "Oct 01, 2026 09:30:22 AM EDT",
+   "applicantTypes": [
+    {
+     "id": "25",
+     "description": "Others (see text field entitled \"Additional Information on Eligibility\" for clarification)"
+    }
+   ],
+   "fundingInstruments": [
+    {
+     "id": "G",
+     "description": "Grant"
+    }
+   ],
+   "fundingActivityCategories": [
+    {
+     "id": "ST",
+     "description": "Science and Technology and other Research and Development"
+    }
+   ],
+   "responseDateStr": "2026-11-17-00-00-00",
+   "postingDateStr": "2026-06-17-00-00-00",
+   "archiveDateStr": "2026-12-17-00-00-00",
+   "createTimeStampStr": "2026-10-01-09-30-22"
+  },
+  "agencyDetails": {
+   "code": "DOCNISTERA",
+   "seed": "DOC-DOCNISTERA",
+   "agencyName": "DOC NIST ERA",
+   "agencyCode": "DOC-DOCNISTERA",
+   "topAgencyCode": "DOC"
+  },
+  "topAgencyDetails": {
+   "code": "DOC",
+   "seed": "DOC",
+   "agencyName": "Department of Commerce",
+   "agencyCode": "DOC",
+   "topAgencyCode": "DOC"
+  },
+  "cfdas": [
+   {
+    "id": 434157,
+    "opportunityId": 362842,
+    "cfdaNumber": "11.036",
+    "programTitle": "Digital Equity Competitive Grant Program"
+   }
+  ],
+  "originalDueDate": "Sep 17, 2026 12:00:00 AM EDT",
+  "originalDueDateDesc": "",
+  "synopsisModifiedFields": [
+   "revision",
+   "version",
+   "synopsisDesc"
+  ],
+  "forecastModifiedFields": [],
+  "errorMessages": [],
+  "synPostDateInPast": true,
+  "docType": "synopsis",
+  "forecastHistCount": 0,
+  "synopsisHistCount": 3,
+  "assistCompatible": false,
+  "assistURL": "",
+  "relatedOpps": [],
+  "draftMode": "N",
+  "ost": "POSTED"
+ }
+}
