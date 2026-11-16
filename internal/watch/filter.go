@@ -110,6 +110,7 @@ var prTerms = []string{
 	"puerto rico", "boricua", "puertorriqueño", "puertorriquena",
 	"san juan", "bayamón", "bayamon", "ponce", "caguas", "mayagüez", "mayaguez",
 	"carolina pr", "arecibo", "guaynabo", "isla del encanto",
+	"villa prades", "barrio obrero", "río piedras", "rio piedras", "santurce",
 	".pr/", "gobierno.pr",
 }
 

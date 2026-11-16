@@ -2,67 +2,45 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-
-	"github.com/google/uuid"
+	"net/url"
 
 	"github.com/Saul-Punybz/folio/internal/models"
-	"github.com/Saul-Punybz/folio/internal/scraper"
 )
 
-// ScanBingNews fetches Bing News RSS for each search query.
-func ScanBingNews(ctx context.Context, org models.WatchlistOrg, queries []string, deps Deps) int {
+// ScanBingNews lee Bing News RSS para cada búsqueda (con la fecha real de
+// publicación y la URL real, sin el apiclick.aspx de Bing).
+func ScanBingNews(ctx context.Context, org models.WatchlistOrg, queries []string, m Matcher, deps Deps) int {
 	hits := 0
 	for _, query := range queries {
 		if hits >= maxResultsPerAgent || ctx.Err() != nil {
 			break
 		}
-
-		agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
-		results, err := scraper.BingNewsSearch(agentCtx, query, maxResultsPerAgent)
-		cancel()
-
+		feedURL := fmt.Sprintf("https://www.bing.com/news/search?q=%s&format=rss", url.QueryEscape(query))
+		items, err := parseFeed(ctx, feedURL)
 		if err != nil {
 			slog.Warn("watchlist/bing_news: search", "query", query, "err", err)
 			continue
 		}
-
-		for _, item := range results {
+		for _, item := range items {
 			if hits >= maxResultsPerAgent {
 				break
 			}
-			if item.URL == "" {
+			link := unwrapRedirect(item.Link)
+			desc := stripHTML(item.Description)
+			if link == "" || isSpamHit(link, item.Title, desc) {
 				continue
 			}
-			if isSpamHit(item.URL, item.Title, item.Snippet) {
+			mt, ok := matchItem(item.Title+" "+desc, org, m)
+			if !ok {
 				continue
 			}
-			if !MatchesOrg(item.Title+" "+item.Snippet, org) {
-				continue
-			}
-
-			urlHash := scraper.HashURL(item.URL)
-			hit := &models.WatchlistHit{
-				ID:         uuid.New(),
-				OrgID:      org.ID,
-				SourceType: "bing_news",
-				Title:      item.Title,
-				URL:        item.URL,
-				URLHash:    urlHash,
-				Snippet:    truncateStr(item.Snippet, 500),
-				Sentiment:  "unknown",
-			}
-
-			if err := deps.Hits.Create(ctx, hit); err != nil {
-				slog.Error("watchlist/bing_news: create hit", "err", err)
-				continue
-			}
-			if hit.ID != uuid.Nil {
+			if saveHit(ctx, deps, org, "bing_news", mt, item.Title, link, desc, item.Published) {
 				hits++
 			}
 		}
 	}
-
 	if hits > 0 {
 		slog.Info("watchlist/bing_news: done", "org", org.Name, "new_hits", hits)
 	}

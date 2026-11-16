@@ -61,33 +61,80 @@ export interface NotesResponse {
   count: number;
 }
 
+export type WatchKind = 'marca' | 'tema' | 'persona';
+
+export interface WatchSocial {
+  network: string;
+  handle: string;
+  url: string;
+}
+
+export interface WatchPerson {
+  name: string;
+  role: string;
+  url: string;
+}
+
 export interface WatchlistOrg {
   id: string;
   user_id: string;
   name: string;
+  kind: WatchKind;
   website: string;
   keywords: string[];
   youtube_channels: string[];
+  aliases: string[];
+  context_aliases: string[];
+  people: WatchPerson[];
+  exclude_terms: string[];
+  hashtags: string[];
+  socials: WatchSocial[];
+  alert_feeds: string[];
+  to_confirm: boolean;
+  sources_evidence: { dato: string; url: string }[];
   active: boolean;
+  unseen: number;
   created_at: string;
   updated_at: string;
 }
 
+export type WatchlistOrgInput = {
+  name: string;
+  kind: WatchKind;
+  website?: string;
+  keywords?: string[];
+  youtube_channels?: string[];
+  aliases?: string[];
+  context_aliases?: string[];
+  people?: WatchPerson[];
+  exclude_terms?: string[];
+  hashtags?: string[];
+  socials?: WatchSocial[];
+  alert_feeds?: string[];
+  to_confirm?: boolean;
+  active?: boolean;
+};
+
 export interface WatchlistOrgsResponse {
   orgs: WatchlistOrg[];
   count: number;
+  max_brands: number;
 }
 
 export interface WatchlistHit {
   id: string;
   org_id: string;
   org_name: string;
-  source_type: 'google_news' | 'bing_news' | 'web' | 'local' | 'youtube' | 'reddit';
+  source_type: 'google_news' | 'bing_news' | 'web' | 'local' | 'youtube' | 'reddit' | 'bluesky' | 'sitio' | 'mastodon' | 'alertas';
+  network: string;
+  matched_hashtag: string;
+  matched_person: string;
   title: string;
   url: string;
   url_hash: string;
   snippet: string;
   seen: boolean;
+  published_at: string | null;
   created_at: string;
 }
 
@@ -365,10 +412,10 @@ export const api = {
   getWatchlistOrgs: (): Promise<WatchlistOrgsResponse> =>
     fetchAPI('/watchlist/orgs'),
 
-  createWatchlistOrg: (data: { name: string; website?: string; keywords: string[]; youtube_channels?: string[] }): Promise<WatchlistOrg> =>
+  createWatchlistOrg: (data: WatchlistOrgInput): Promise<WatchlistOrg> =>
     fetchAPI('/watchlist/orgs', { method: 'POST', body: JSON.stringify(data) }),
 
-  updateWatchlistOrg: (id: string, data: { name: string; website?: string; keywords: string[]; youtube_channels?: string[]; active?: boolean }): Promise<WatchlistOrg> =>
+  updateWatchlistOrg: (id: string, data: WatchlistOrgInput): Promise<WatchlistOrg> =>
     fetchAPI(`/watchlist/orgs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   deleteWatchlistOrg: (id: string) =>
@@ -396,6 +443,9 @@ export const api = {
 
   deleteHit: (id: string) =>
     fetchAPI(`/watchlist/hits/${id}`, { method: 'DELETE' }),
+
+  markOrgHitsSeen: (id: string) =>
+    fetchAPI(`/watchlist/orgs/${id}/seen-all`, { method: 'POST' }),
 
   triggerWatchlistScan: (): Promise<{ status: string; message: string }> =>
     fetchAPI('/watchlist/scan', { method: 'POST' }),

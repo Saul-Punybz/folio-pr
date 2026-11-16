@@ -6,70 +6,44 @@ import (
 	"log/slog"
 	"net/url"
 
-	"github.com/google/uuid"
-
 	"github.com/Saul-Punybz/folio/internal/models"
-	"github.com/Saul-Punybz/folio/internal/scraper"
 )
 
-// ScanGoogleNews fetches Google News RSS for each search query.
-func ScanGoogleNews(ctx context.Context, org models.WatchlistOrg, queries []string, deps Deps) int {
+// Google News en español de PR y en inglés de EE. UU. (la prensa de fondos y
+// aliados como LISC o NFF sale en inglés).
+var googleNewsLocales = []string{"hl=es-419&gl=PR&ceid=PR:es-419", "hl=en-US&gl=US&ceid=US:en"}
+
+// ScanGoogleNews lee Google News RSS (PR, español) para cada búsqueda.
+func ScanGoogleNews(ctx context.Context, org models.WatchlistOrg, queries []string, m Matcher, deps Deps) int {
 	hits := 0
 	for _, query := range queries {
-		if hits >= maxResultsPerAgent || ctx.Err() != nil {
-			break
-		}
-
-		feedURL := fmt.Sprintf(
-			"https://news.google.com/rss/search?q=%s&hl=es-419&gl=PR&ceid=PR:es-419",
-			url.QueryEscape(query),
-		)
-
-		agentCtx, cancel := context.WithTimeout(ctx, agentTimeout)
-		items, err := scraper.ParseFeed(agentCtx, feedURL)
-		cancel()
-
-		if err != nil {
-			slog.Warn("watchlist/google_news: parse feed", "query", query, "err", err)
-			continue
-		}
-
-		for _, item := range items {
-			if hits >= maxResultsPerAgent {
+		for _, loc := range googleNewsLocales {
+			if hits >= maxResultsPerAgent || ctx.Err() != nil {
 				break
 			}
-			if item.Link == "" {
+			feedURL := fmt.Sprintf("https://news.google.com/rss/search?q=%s&%s", url.QueryEscape(query), loc)
+			items, err := parseFeed(ctx, feedURL)
+			if err != nil {
+				slog.Warn("watchlist/google_news: parse feed", "query", query, "err", err)
 				continue
 			}
-			if isSpamHit(item.Link, item.Title, item.Description) {
-				continue
-			}
-			if !MatchesOrg(item.Title+" "+item.Description, org) {
-				continue
-			}
-
-			urlHash := scraper.HashURL(item.Link)
-			hit := &models.WatchlistHit{
-				ID:         uuid.New(),
-				OrgID:      org.ID,
-				SourceType: "google_news",
-				Title:      item.Title,
-				URL:        item.Link,
-				URLHash:    urlHash,
-				Snippet:    truncateStr(item.Description, 500),
-				Sentiment:  "unknown",
-			}
-
-			if err := deps.Hits.Create(ctx, hit); err != nil {
-				slog.Error("watchlist/google_news: create hit", "err", err)
-				continue
-			}
-			if hit.ID != uuid.Nil {
-				hits++
+			for _, item := range items {
+				if hits >= maxResultsPerAgent {
+					break
+				}
+				if item.Link == "" || isSpamHit(item.Link, item.Title, item.Description) {
+					continue
+				}
+				mt, ok := matchItem(item.Title+" "+stripHTML(item.Description), org, m)
+				if !ok {
+					continue
+				}
+				if saveHit(ctx, deps, org, "google_news", mt, item.Title, item.Link, stripHTML(item.Description), item.Published) {
+					hits++
+				}
 			}
 		}
 	}
-
 	if hits > 0 {
 		slog.Info("watchlist/google_news: done", "org", org.Name, "new_hits", hits)
 	}

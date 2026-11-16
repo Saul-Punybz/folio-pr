@@ -1,20 +1,47 @@
-import { useState, useEffect, useCallback } from 'react';
-import { api, type WatchlistOrg, type WatchlistHit } from '../lib/api';
-import { Icon, Spinner, EmptyState, Modal } from './ui';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { api, type WatchlistOrg, type WatchlistHit, type WatchKind, type WatchSocial, type WatchlistOrgInput, type WatchPerson } from '../lib/api';
+import { Icon, Spinner, EmptyState, Modal, Notice } from './ui';
 
-const SOURCE_TYPES = [
-  { key: 'all', label: 'Todos' },
-  { key: 'google_news', label: 'Google News' },
-  { key: 'web', label: 'Web' },
-  { key: 'local', label: 'Local' },
-  { key: 'youtube', label: 'YouTube' },
-  { key: 'reddit', label: 'Reddit' },
-] as const;
+// ── Fuentes y redes ──────────────────────────────────────────────
+
+const SOURCE_LABELS: Record<string, string> = {
+  local: 'Noticias PR',
+  google_news: 'Google News',
+  bing_news: 'Bing News',
+  web: 'Web',
+  sitio: 'Sitio',
+  alertas: 'Alertas',
+  youtube: 'YouTube',
+  bluesky: 'Bluesky',
+  mastodon: 'Mastodon',
+  reddit: 'Reddit',
+};
+const SOURCE_ORDER = Object.keys(SOURCE_LABELS);
+
+const NETWORKS: { key: string; label: string; short: string }[] = [
+  { key: 'instagram', label: 'Instagram', short: 'IG' },
+  { key: 'facebook', label: 'Facebook', short: 'FB' },
+  { key: 'linkedin', label: 'LinkedIn', short: 'in' },
+  { key: 'x', label: 'X', short: 'X' },
+  { key: 'tiktok', label: 'TikTok', short: 'TT' },
+  { key: 'youtube', label: 'YouTube', short: 'YT' },
+  { key: 'threads', label: 'Threads', short: 'Th' },
+  { key: 'bluesky', label: 'Bluesky', short: 'BS' },
+];
+const NET = Object.fromEntries(NETWORKS.map(n => [n.key, n]));
+
+const HASHTAG_LINKS: { label: string; url: (t: string) => string }[] = [
+  { label: 'Instagram', url: t => `https://www.instagram.com/explore/tags/${t}/` },
+  { label: 'Facebook', url: t => `https://www.facebook.com/hashtag/${t}` },
+  { label: 'LinkedIn', url: t => `https://www.linkedin.com/feed/hashtag/${t}/` },
+  { label: 'TikTok', url: t => `https://www.tiktok.com/tag/${t}` },
+  { label: 'X', url: t => `https://x.com/hashtag/${t}` },
+];
+
+const cleanTag = (t: string) => t.trim().replace(/^#+/, '');
 
 function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diff = now - then;
+  const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'ahora';
   if (mins < 60) return `hace ${mins} min`;
@@ -22,446 +49,600 @@ function timeAgo(dateStr: string): string {
   if (hrs < 24) return `hace ${hrs} h`;
   const days = Math.floor(hrs / 24);
   if (days < 30) return `hace ${days} d`;
-  return `hace ${Math.floor(days / 30)} m`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `hace ${months} m`;
+  return new Date(dateStr).toLocaleDateString('es-PR', { year: 'numeric', month: 'short' });
 }
 
-// ── SVG Source Icons ─────────────────────────────────────────────
+const hitDate = (h: WatchlistHit) => h.published_at || h.created_at;
 
-function SourceIcon({ type, className = 'w-5 h-5' }: { type: string; className?: string }) {
-  switch (type) {
-    case 'google_news':
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V18a2.25 2.25 0 01-2.25 2.25M16.5 7.5V18a2.25 2.25 0 002.25 2.25M16.5 7.5V4.875c0-.621-.504-1.125-1.125-1.125H4.125C3.504 3.75 3 4.254 3 4.875V18a2.25 2.25 0 002.25 2.25h13.5M6 7.5h3v3H6V7.5z" />
-        </svg>
-      );
-    case 'web':
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-        </svg>
-      );
-    case 'local':
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008V7.5z" />
-        </svg>
-      );
-    case 'youtube':
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
-        </svg>
-      );
-    case 'reddit':
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-        </svg>
-      );
-    default:
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-        </svg>
-      );
+/** Handle a partir del enlace: https://www.instagram.com/vimentipr/ → vimentipr */
+function handleFromURL(url: string): string {
+  try {
+    const u = new URL(url);
+    const id = u.searchParams.get('id');
+    if (id) return id;
+    const parts = u.pathname.split('/').filter(Boolean);
+    return (parts[parts.length - 1] || u.hostname).replace(/^@/, '');
+  } catch {
+    return url;
   }
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  google_news: 'Google News',
-  web: 'Web',
-  local: 'Local',
-  youtube: 'YouTube',
-  reddit: 'Reddit',
+const splitList = (s: string, sep: RegExp = /[,\n]/) => s.split(sep).map(x => x.trim()).filter(Boolean);
+
+function NetBadge({ network }: { network: string }) {
+  const n = NET[network];
+  return (
+    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-surface-container-highest text-on-surface-variant text-[11px] font-extrabold" title={n?.label || network}>
+      {n?.short || network.slice(0, 2)}
+    </span>
+  );
+}
+
+// ── Formulario ───────────────────────────────────────────────────
+
+type FormState = {
+  name: string;
+  kind: WatchKind;
+  website: string;
+  aliases: string;
+  ctxAliases: string;
+  exclude: string;
+  hashtags: string;
+  keywords: string;
+  youtube: string;
+  alerts: string;
+  socials: Record<string, string>;
+  people: WatchPerson[];
 };
+
+const emptyForm = (kind: WatchKind): FormState => ({
+  name: '', kind, website: '', aliases: '', ctxAliases: '', exclude: '', hashtags: '', keywords: '', youtube: '', alerts: '', socials: {}, people: [],
+});
+
+function formFromOrg(o: WatchlistOrg): FormState {
+  const socials: Record<string, string> = {};
+  for (const s of o.socials) socials[s.network] = s.url || s.handle;
+  return {
+    name: o.name, kind: o.kind, website: o.website || '',
+    aliases: o.aliases.join(', '), ctxAliases: (o.context_aliases || []).join(', '), exclude: o.exclude_terms.join(', '),
+    hashtags: o.hashtags.map(t => '#' + t).join(' '), keywords: o.keywords.join(', '),
+    youtube: o.youtube_channels.join('\n'), alerts: o.alert_feeds.join('\n'), socials,
+    people: (o.people || []).map(p => ({ ...p })),
+  };
+}
+
+function inputFromForm(f: FormState, prev: WatchlistOrg | null): WatchlistOrgInput {
+  const socials: WatchSocial[] = [];
+  for (const n of NETWORKS) {
+    const v = (f.socials[n.key] || '').trim();
+    if (!v) continue;
+    const old = prev?.socials.find(s => s.network === n.key);
+    if (/^https?:\/\//.test(v)) {
+      // Se conserva el channel_id de YouTube guardado si el enlace no cambió.
+      const handle = old && old.url === v ? old.handle : handleFromURL(v);
+      socials.push({ network: n.key, handle, url: v });
+    } else {
+      socials.push({ network: n.key, handle: v.replace(/^@/, ''), url: old?.handle === v ? old.url : '' });
+    }
+  }
+  const name = f.name.trim();
+  let aliases = splitList(f.aliases);
+  const context_aliases = splitList(f.ctxAliases);
+  if (f.kind === 'marca' && aliases.length === 0 && context_aliases.length === 0) aliases = [name];
+  return {
+    name,
+    kind: f.kind,
+    website: f.website.trim(),
+    aliases,
+    context_aliases,
+    exclude_terms: splitList(f.exclude),
+    hashtags: splitList(f.hashtags, /[\s,]+/).map(cleanTag).filter(Boolean),
+    keywords: splitList(f.keywords),
+    youtube_channels: splitList(f.youtube, /\n/),
+    alert_feeds: splitList(f.alerts, /\n/),
+    socials,
+    people: f.people.map(p => ({ name: p.name.trim(), role: p.role.trim(), url: p.url.trim() })).filter(p => p.name),
+    to_confirm: false,
+    active: prev ? prev.active : true,
+  };
+}
+
+function OrgForm({ form, setForm }: { form: FormState; setForm: (f: FormState) => void }) {
+  const set = (k: keyof FormState) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  const brand = form.kind === 'marca';
+  return (
+    <div className="space-y-4">
+      <div>
+        <label htmlFor="wo-name" className="field-label">Nombre</label>
+        <input id="wo-name" type="text" value={form.name} onChange={set('name')} className="field" autoFocus />
+      </div>
+      {!brand && (
+        <div className="chip-row" role="group" aria-label="Tipo">
+          <button type="button" className="chip" aria-pressed={form.kind === 'tema'} onClick={() => setForm({ ...form, kind: 'tema' })}>Tema</button>
+          <button type="button" className="chip" aria-pressed={form.kind === 'persona'} onClick={() => setForm({ ...form, kind: 'persona' })}>Persona</button>
+        </div>
+      )}
+      {brand ? (
+        <>
+          <div>
+            <label htmlFor="wo-alias" className="field-label">Alias (separados por coma)</label>
+            <input id="wo-alias" type="text" value={form.aliases} onChange={set('aliases')} placeholder="Vimenti, Escuela Vimenti" className="field" />
+          </div>
+          <div>
+            <label htmlFor="wo-ctx" className="field-label">Alias que solo cuentan junto a Puerto Rico</label>
+            <input id="wo-ctx" type="text" value={form.ctxAliases} onChange={set('ctxAliases')} placeholder="PSI, Oasis Hub" className="field" />
+          </div>
+          <div>
+            <label htmlFor="wo-ex" className="field-label">Excluir si dice</label>
+            <input id="wo-ex" type="text" value={form.exclude} onChange={set('exclude')} placeholder="hotel, banda" className="field" />
+          </div>
+          <div>
+            <label htmlFor="wo-ht" className="field-label">Hashtags</label>
+            <input id="wo-ht" type="text" value={form.hashtags} onChange={set('hashtags')} placeholder="#vimentipr" className="field" />
+          </div>
+        </>
+      ) : (
+        <div>
+          <label htmlFor="wo-kw" className="field-label">Palabras clave (separadas por coma)</label>
+          <textarea id="wo-kw" value={form.keywords} onChange={set('keywords')} rows={2} className="field" />
+        </div>
+      )}
+      <div>
+        <label htmlFor="wo-web" className="field-label">Página web</label>
+        <input id="wo-web" type="url" value={form.website} onChange={set('website')} placeholder="https://" className="field" />
+      </div>
+      {brand && (
+        <div className="space-y-2">
+          <span className="field-label">Personas clave</span>
+          {form.people.map((p, i) => {
+            const setP = (k: keyof WatchPerson, v: string) => setForm({ ...form, people: form.people.map((x, j) => (j === i ? { ...x, [k]: v } : x)) });
+            return (
+              <div key={i} className="p-3 rounded-[20px] bg-surface-container space-y-2">
+                <div className="flex items-center gap-2">
+                  <input type="text" aria-label="Nombre" value={p.name} onChange={e => setP('name', e.target.value)} placeholder="Nombre y apellido" className="field !py-2.5" />
+                  <button type="button" onClick={() => setForm({ ...form, people: form.people.filter((_, j) => j !== i) })} className="icon-btn hover:text-error shrink-0" aria-label={`Quitar a ${p.name || 'esta persona'}`}><Icon name="trash" className="w-5 h-5" /></button>
+                </div>
+                <input type="text" aria-label="Cargo" value={p.role} onChange={e => setP('role', e.target.value)} placeholder="Cargo" className="field !py-2.5" />
+                <input type="url" aria-label="Perfil" value={p.url} onChange={e => setP('url', e.target.value)} placeholder="Enlace de perfil" className="field !py-2.5" />
+              </div>
+            );
+          })}
+          <button type="button" onClick={() => setForm({ ...form, people: [...form.people, { name: '', role: '', url: '' }] })} className="btn btn-soft btn-sm">
+            <Icon name="plus" className="w-5 h-5" />Añadir persona
+          </button>
+        </div>
+      )}
+      {brand && (
+        <div className="space-y-2">
+          <span className="field-label">Perfiles</span>
+          {NETWORKS.map(n => (
+            <div key={n.key} className="flex items-center gap-2">
+              <NetBadge network={n.key} />
+              <input
+                type="text"
+                aria-label={n.label}
+                value={form.socials[n.key] || ''}
+                onChange={e => setForm({ ...form, socials: { ...form.socials, [n.key]: e.target.value } })}
+                placeholder={`Enlace de ${n.label}`}
+                className="field !py-2.5"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <div>
+        <label htmlFor="wo-alert" className="field-label">Feeds de alertas (uno por línea)</label>
+        <textarea id="wo-alert" value={form.alerts} onChange={set('alerts')} rows={2} placeholder="https://www.google.com/alerts/feeds/…" className="field font-mono text-xs" />
+      </div>
+      {!brand && (
+        <div>
+          <label htmlFor="wo-yt" className="field-label">Canales de YouTube (uno por línea)</label>
+          <textarea id="wo-yt" value={form.youtube} onChange={set('youtube')} placeholder="UCxxxxxxxxxxxxxx" rows={2} className="field" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Pantalla ─────────────────────────────────────────────────────
 
 export default function WatchlistManager() {
   const [orgs, setOrgs] = useState<WatchlistOrg[]>([]);
+  const [maxBrands, setMaxBrands] = useState(10);
+  const [selected, setSelected] = useState<string | null>(null);
   const [hits, setHits] = useState<WatchlistHit[]>([]);
-  const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [tagFilter, setTagFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [hitsLoading, setHitsLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  // Modals
-  const [showAddOrg, setShowAddOrg] = useState(false);
-  const [editingOrg, setEditingOrg] = useState<WatchlistOrg | null>(null);
+  const [editing, setEditing] = useState<WatchlistOrg | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
+  const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [showRSSModal, setShowRSSModal] = useState(false);
+
+  const [showRSS, setShowRSS] = useState(false);
   const [feedURL, setFeedURL] = useState('');
   const [feedCopied, setFeedCopied] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
 
-  // Form
-  const [formName, setFormName] = useState('');
-  const [formWebsite, setFormWebsite] = useState('');
-  const [formKeywords, setFormKeywords] = useState('');
-  const [formYouTube, setFormYouTube] = useState('');
+  const brands = orgs.filter(o => o.kind === 'marca');
+  const topics = orgs.filter(o => o.kind !== 'marca');
+  const current = orgs.find(o => o.id === selected) || null;
+  const activeBrands = brands.filter(b => b.active).length;
 
   const fetchOrgs = useCallback(async () => {
     try {
       const data = await api.getWatchlistOrgs();
       setOrgs(data.orgs || []);
+      if (data.max_brands) setMaxBrands(data.max_brands);
+      return data.orgs || [];
     } catch (e) {
-      console.error('Failed to fetch orgs:', e);
+      setError(e instanceof Error ? e.message : 'No se pudo cargar.');
+      return [];
     }
   }, []);
 
-  const fetchHits = useCallback(async () => {
+  const fetchHits = useCallback(async (orgID: string | null) => {
     setHitsLoading(true);
     try {
-      const params: { limit?: number; org_id?: string } = { limit: 100 };
-      if (selectedOrg) params.org_id = selectedOrg;
-      const data = await api.getWatchlistHits(params);
-      let filtered = data.hits || [];
-      if (sourceFilter !== 'all') {
-        filtered = filtered.filter(h => h.source_type === sourceFilter);
-      }
-      setHits(filtered);
+      const data = await api.getWatchlistHits(orgID ? { limit: 300, org_id: orgID } : { limit: 100 });
+      setHits(data.hits || []);
     } catch (e) {
-      console.error('Failed to fetch hits:', e);
+      setError(e instanceof Error ? e.message : 'No se pudieron cargar las menciones.');
     } finally {
       setHitsLoading(false);
     }
-  }, [selectedOrg, sourceFilter]);
+  }, []);
 
   useEffect(() => {
     (async () => {
-      await fetchOrgs();
+      const list = await fetchOrgs();
+      const first = list.find(o => o.kind === 'marca') || list[0];
+      if (first) setSelected(first.id);
       setLoading(false);
     })();
   }, [fetchOrgs]);
 
   useEffect(() => {
-    if (!loading) fetchHits();
-  }, [loading, fetchHits]);
+    setSourceFilter('all');
+    setTagFilter('');
+    if (selected) fetchHits(selected);
+    else setHits([]);
+  }, [selected, fetchHits]);
 
-  // Org CRUD
-  const handleSaveOrg = async () => {
-    const keywords = formKeywords.split(',').map(k => k.trim()).filter(Boolean);
-    const youtube_channels = formYouTube.split('\n').map(c => c.trim()).filter(Boolean);
-    const website = formWebsite.trim();
+  // ── Acciones ──
+  const openNew = (kind: WatchKind) => { setEditing(null); setForm(emptyForm(kind)); setError(''); };
+  const openEdit = (o: WatchlistOrg) => { setEditing(o); setForm(formFromOrg(o)); setError(''); };
+  const closeForm = () => { setForm(null); setEditing(null); };
 
+  const save = async () => {
+    if (!form || !form.name.trim()) return;
+    setSaving(true);
+    setError('');
     try {
-      if (editingOrg) {
-        await api.updateWatchlistOrg(editingOrg.id, { name: formName, website, keywords, youtube_channels });
-      } else {
-        await api.createWatchlistOrg({ name: formName, website, keywords, youtube_channels });
-      }
-      setShowAddOrg(false);
-      setEditingOrg(null);
-      resetForm();
+      const input = inputFromForm(form, editing);
+      const saved = editing ? await api.updateWatchlistOrg(editing.id, input) : await api.createWatchlistOrg(input);
+      closeForm();
       await fetchOrgs();
+      setSelected(saved.id);
     } catch (e) {
-      console.error('Failed to save org:', e);
+      setError(e instanceof Error ? e.message : 'No se pudo guardar.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDeleteOrg = async (id: string) => {
+  const toggle = async (o: WatchlistOrg) => {
+    setError('');
     try {
-      await api.deleteWatchlistOrg(id);
-      if (selectedOrg === id) setSelectedOrg(null);
+      await api.toggleWatchlistOrg(o.id, !o.active);
       await fetchOrgs();
-      await fetchHits();
     } catch (e) {
-      console.error('Failed to delete org:', e);
+      setError(e instanceof Error ? e.message : 'No se pudo cambiar.');
     }
   };
 
-  const handleToggleOrg = async (id: string, active: boolean) => {
+  const remove = async (o: WatchlistOrg) => {
+    if (!confirm(`¿Borrar «${o.name}» y sus menciones?`)) return;
     try {
-      await api.toggleWatchlistOrg(id, !active);
-      await fetchOrgs();
+      await api.deleteWatchlistOrg(o.id);
+      const list = await fetchOrgs();
+      setSelected(list.find(x => x.kind === 'marca')?.id || list[0]?.id || null);
     } catch (e) {
-      console.error('Failed to toggle org:', e);
+      setError(e instanceof Error ? e.message : 'No se pudo borrar.');
     }
   };
 
-  const startEdit = (org: WatchlistOrg) => {
-    setEditingOrg(org);
-    setFormName(org.name);
-    setFormWebsite(org.website || '');
-    setFormKeywords(org.keywords.join(', '));
-    setFormYouTube(org.youtube_channels.join('\n'));
-    setShowAddOrg(true);
-  };
-
-  const resetForm = () => {
-    setFormName('');
-    setFormWebsite('');
-    setFormKeywords('');
-    setFormYouTube('');
-  };
-
-  // Hit actions
-  const handleMarkSeen = async (id: string) => {
+  const markSeen = async (id: string) => {
     try {
       await api.markHitSeen(id);
-      setHits(prev => prev.map(h => h.id === id ? { ...h, seen: true } : h));
-    } catch (e) {
-      console.error('Failed to mark seen:', e);
-    }
+      setHits(prev => prev.map(h => (h.id === id ? { ...h, seen: true } : h)));
+      setOrgs(prev => prev.map(o => (o.id === selected ? { ...o, unseen: Math.max(0, o.unseen - 1) } : o)));
+    } catch { /* se queda como estaba */ }
   };
 
-  const handleMarkAllSeen = async () => {
+  const markAll = async () => {
+    if (!selected) return;
     try {
-      await api.markAllHitsSeen();
+      await api.markOrgHitsSeen(selected);
       setHits(prev => prev.map(h => ({ ...h, seen: true })));
-    } catch (e) {
-      console.error('Failed to mark all seen:', e);
-    }
+      setOrgs(prev => prev.map(o => (o.id === selected ? { ...o, unseen: 0 } : o)));
+    } catch { /* se queda como estaba */ }
   };
 
-  const handleDeleteHit = async (id: string) => {
+  const removeHit = async (id: string) => {
     try {
       await api.deleteHit(id);
       setHits(prev => prev.filter(h => h.id !== id));
-    } catch (e) {
-      console.error('Failed to delete hit:', e);
-    }
+    } catch { /* se queda como estaba */ }
   };
 
-  const handleTriggerScan = async () => {
+  const scan = async () => {
     if (scanning || orgs.length === 0) return;
     setScanning(true);
     try {
       await api.triggerWatchlistScan();
-      // Poll for new results every 3 seconds for 30 seconds
       let polls = 0;
-      const interval = setInterval(async () => {
+      const t = setInterval(async () => {
         polls++;
-        await fetchHits();
-        if (polls >= 10) clearInterval(interval);
-      }, 3000);
-      // Also stop scanning indicator after 15s
-      setTimeout(() => setScanning(false), 15000);
+        await fetchOrgs();
+        if (selected) await fetchHits(selected);
+        if (polls >= 20) { clearInterval(t); setScanning(false); }
+      }, 6000);
     } catch (e) {
-      console.error('Failed to trigger scan:', e);
+      setError(e instanceof Error ? e.message : 'No se pudo buscar.');
       setScanning(false);
     }
   };
 
-  const handleShowRSS = async () => {
+  const openRSS = async () => {
     try {
       const data = await api.getWatchlistFeedURL();
       setFeedURL(window.location.origin + data.url);
-      setShowRSSModal(true);
       setFeedCopied(false);
-    } catch (e) {
-      console.error('Failed to get feed URL:', e);
-    }
+      setShowRSS(true);
+    } catch { /* nada */ }
   };
 
-  const handleCopyFeedURL = async () => {
-    try {
-      await navigator.clipboard.writeText(feedURL);
-      setFeedCopied(true);
-      setTimeout(() => setFeedCopied(false), 2000);
-    } catch {
-      // Fallback
-      const input = document.createElement('input');
-      input.value = feedURL;
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand('copy');
-      document.body.removeChild(input);
-      setFeedCopied(true);
-      setTimeout(() => setFeedCopied(false), 2000);
-    }
-  };
-
-  const handleRegenerateFeed = async () => {
-    if (regenerating) return;
-    setRegenerating(true);
-    try {
-      const data = await api.regenerateWatchlistFeedURL();
-      setFeedURL(window.location.origin + data.url);
-      setFeedCopied(false);
-    } catch (e) {
-      console.error('Failed to regenerate feed URL:', e);
-    } finally {
-      setRegenerating(false);
-    }
-  };
-
-  const unseenCount = hits.filter(h => !h.seen).length;
+  // ── Menciones filtradas y agrupadas ──
+  const sourceCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const h of hits) c[h.source_type] = (c[h.source_type] || 0) + 1;
+    return c;
+  }, [hits]);
+  const tagCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const h of hits) if (h.matched_hashtag) c[h.matched_hashtag] = (c[h.matched_hashtag] || 0) + 1;
+    return c;
+  }, [hits]);
+  const visible = hits.filter(h => (sourceFilter === 'all' || h.source_type === sourceFilter) && (!tagFilter || h.matched_hashtag === tagFilter));
+  const groups = SOURCE_ORDER.map(s => ({ source: s, items: visible.filter(h => h.source_type === s) })).filter(g => g.items.length > 0);
+  const unseenHere = hits.filter(h => !h.seen).length;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-primary">
-        <Spinner className="w-8 h-8" />
-      </div>
-    );
+    return <div className="flex items-center justify-center py-20 text-primary"><Spinner className="w-8 h-8" /></div>;
   }
 
-  const closeOrgModal = () => { setShowAddOrg(false); setEditingOrg(null); };
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="title-xl">Vigilancia</h1>
-          {unseenCount > 0 && <span className="tag tag-accent !text-sm !px-3.5 !py-1.5">{unseenCount} sin leer</span>}
+          <h1 className="title-xl">Marcas</h1>
+          <span className="tag">{activeBrands}/{maxBrands}</span>
         </div>
-        <button type="button" onClick={handleShowRSS} className="btn btn-soft btn-sm" title="Feed RSS">
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6.18 15.64a2.18 2.18 0 010 4.36 2.18 2.18 0 010-4.36zM4 4.44A15.56 15.56 0 0119.56 20h-2.83A12.73 12.73 0 004 7.27V4.44zm0 5.66a9.9 9.9 0 019.9 9.9h-2.83A7.07 7.07 0 004 12.93V10.1z" />
-          </svg>
-          Feed RSS
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={openRSS} className="btn btn-soft btn-sm">Feed RSS</button>
+          <button type="button" onClick={() => openNew('marca')} disabled={activeBrands >= maxBrands} className="btn btn-tonal btn-sm">
+            <Icon name="plus" className="w-5 h-5" />Añadir marca
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6">
-        {/* Organizaciones */}
-        <div className="w-full lg:w-80 shrink-0 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="title-lg">Organizaciones ({orgs.length})</h2>
-            <button type="button" onClick={() => { resetForm(); setEditingOrg(null); setShowAddOrg(true); }} className="btn btn-tonal btn-sm">
-              <Icon name="plus" className="w-5 h-5" />Agregar
-            </button>
+      {error && !form && <Notice>{error}</Notice>}
+
+      {/* Baldosas */}
+      {brands.length === 0 ? (
+        <EmptyState icon="eye" text="Añade una marca para empezar." />
+      ) : (
+        <div className="stagger grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {brands.map(b => {
+            const on = b.id === selected;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => setSelected(b.id)}
+                aria-pressed={on}
+                className={`text-left p-5 rounded-[28px] transition-[border-radius,background-color] duration-500 ease-[var(--spring)] hover:rounded-[36px] ${on ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container-low'} ${b.active ? '' : 'opacity-60'}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="title-md leading-tight">{b.name}</span>
+                  {b.unseen > 0 && <span className="tag tag-accent shrink-0">{b.unseen}</span>}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  {b.to_confirm && <span className="tag tag-bad">Por confirmar</span>}
+                  {!b.active && <span className="tag">En pausa</span>}
+                  {b.socials.map(s => <NetBadge key={s.network + s.handle} network={s.network} />)}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Ficha */}
+      {current && (
+        <section className="space-y-4" aria-label={`Ficha de ${current.name}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <h2 className="title-lg truncate">{current.name}</h2>
+              {current.kind !== 'marca' && <span className="tag">{current.kind === 'persona' ? 'Persona' : 'Tema'}</span>}
+            </div>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => openEdit(current)} className="icon-btn" title="Editar" aria-label="Editar"><Icon name="note" className="w-5 h-5" /></button>
+              <button type="button" onClick={() => toggle(current)} className="btn btn-text btn-sm">{current.active ? 'Pausar' : 'Activar'}</button>
+              <button type="button" onClick={() => remove(current)} className="icon-btn hover:text-error" title="Borrar" aria-label="Borrar"><Icon name="trash" className="w-5 h-5" /></button>
+            </div>
           </div>
 
-          {orgs.length === 0 ? (
-            <EmptyState icon="eye" text="Agrega una organización para empezar a vigilar." />
+          {current.to_confirm && (
+            <Notice kind="accent">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span>Faltan datos de esta marca.</span>
+                <button type="button" onClick={() => openEdit(current)} className="btn btn-filled btn-sm">Completar</button>
+              </div>
+            </Notice>
+          )}
+
+          {(current.website || current.socials.length > 0) && (
+            <div className="chip-row">
+              {current.website && (
+                <a href={current.website} target="_blank" rel="noopener noreferrer" className="chip"><Icon name="globe" className="w-4 h-4" />Sitio</a>
+              )}
+              {current.socials.filter(s => s.url).map(s => (
+                <a key={s.network + s.url} href={s.url} target="_blank" rel="noopener noreferrer" className="chip">
+                  <Icon name="open" className="w-4 h-4" />Abrir en {NET[s.network]?.label || s.network}
+                </a>
+              ))}
+            </div>
+          )}
+
+          {(current.people || []).length > 0 && (
+            <div className="chip-row">
+              {current.people.map(p => (
+                p.url ? (
+                  <a key={p.name} href={p.url} target="_blank" rel="noopener noreferrer" className="chip">{p.name}{p.role ? ` · ${p.role}` : ''}</a>
+                ) : (
+                  <span key={p.name} className="chip">{p.name}{p.role ? ` · ${p.role}` : ''}</span>
+                )
+              ))}
+            </div>
+          )}
+
+          {current.hashtags.length > 0 && (
+            <div className="space-y-2">
+              {current.hashtags.map(t => (
+                <div key={t} className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-extrabold">Ver #{t} en</span>
+                  {HASHTAG_LINKS.map(l => (
+                    <a key={l.label} href={l.url(encodeURIComponent(t))} target="_blank" rel="noopener noreferrer" className="btn btn-soft btn-sm">{l.label}</a>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="chip-row chip-scroll" role="group" aria-label="Fuente">
+              <button type="button" className="chip" aria-pressed={sourceFilter === 'all'} onClick={() => setSourceFilter('all')}>Todas · {hits.length}</button>
+              {SOURCE_ORDER.filter(s => sourceCounts[s]).map(s => (
+                <button key={s} type="button" className="chip" aria-pressed={sourceFilter === s} onClick={() => setSourceFilter(s)}>
+                  {SOURCE_LABELS[s]} · {sourceCounts[s]}
+                </button>
+              ))}
+            </div>
+            {unseenHere > 0 && (
+              <button type="button" onClick={markAll} className="btn btn-text btn-sm"><Icon name="check" className="w-5 h-5" />Marcar todo visto</button>
+            )}
+          </div>
+
+          {Object.keys(tagCounts).length > 0 && (
+            <div className="chip-row chip-scroll" role="group" aria-label="Hashtag">
+              <button type="button" className="chip" aria-pressed={!tagFilter} onClick={() => setTagFilter('')}>Todos los hashtags</button>
+              {Object.entries(tagCounts).map(([t, n]) => (
+                <button key={t} type="button" className="chip" aria-pressed={tagFilter === t} onClick={() => setTagFilter(t)}>#{t} · {n}</button>
+              ))}
+            </div>
+          )}
+
+          {hitsLoading ? (
+            <div className="flex justify-center py-10 text-primary"><Spinner className="w-7 h-7" /></div>
+          ) : visible.length === 0 ? (
+            <EmptyState icon="eye" text="Aún no hay menciones. Toca «Buscar ahora»." />
           ) : (
-            <div className="seg-list">
-              {orgs.map(org => (
-                <div
-                  key={org.id}
-                  className={`p-4 cursor-pointer ${selectedOrg === org.id ? '!bg-primary-container text-on-primary-container' : ''}`}
-                  onClick={() => setSelectedOrg(selectedOrg === org.id ? null : org.id)}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={selectedOrg === org.id}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedOrg(selectedOrg === org.id ? null : org.id); } }}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-3 h-3 rounded-full shrink-0 ${org.active ? 'bg-success' : 'bg-outline'}`} title={org.active ? 'Activa' : 'En pausa'} />
-                      <span className="title-md truncate">{org.name}</span>
-                    </div>
-                    <div className="flex items-center shrink-0 -mr-2">
-                      <button type="button" onClick={(e) => { e.stopPropagation(); startEdit(org); }} className="icon-btn" title="Editar" aria-label={`Editar ${org.name}`}>
-                        <Icon name="note" className="w-5 h-5" />
-                      </button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); handleToggleOrg(org.id, org.active); }} className="icon-btn" title={org.active ? 'Pausar' : 'Activar'} aria-label={`${org.active ? 'Pausar' : 'Activar'} ${org.name}`}>
-                        {org.active ? (
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9v6m-4.5 0V9M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        ) : (
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" /></svg>
-                        )}
-                      </button>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); if (confirm(`¿Quitar a ${org.name}?`)) handleDeleteOrg(org.id); }} className="icon-btn hover:text-error" title="Quitar" aria-label={`Quitar ${org.name}`}>
-                        <Icon name="trash" className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 flex-wrap text-xs font-semibold opacity-80">
-                    <span>{org.keywords.length} palabras clave</span>
-                    {org.youtube_channels.length > 0 && <span>{org.youtube_channels.length} canales</span>}
-                    {org.website && (
-                      <span className="truncate max-w-[140px]" title={org.website}>
-                        {org.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}
-                      </span>
-                    )}
+            <div className="space-y-6">
+              {groups.map(g => (
+                <div key={g.source} className="space-y-3">
+                  <h3 className="title-md">{SOURCE_LABELS[g.source]} <span className="text-on-surface-variant">· {g.items.length}</span></h3>
+                  <div className="stagger grid grid-cols-1 xl:grid-cols-2 gap-3 items-start">
+                    {g.items.map(h => <HitCard key={h.id} hit={h} onSeen={() => markSeen(h.id)} onDelete={() => removeHit(h.id)} />)}
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </section>
+      )}
 
-        {/* Menciones */}
-        <div className="flex-1 min-w-0 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="chip-row chip-scroll" role="group" aria-label="Origen">
-              {SOURCE_TYPES.map(st => (
-                <button key={st.key} type="button" onClick={() => setSourceFilter(st.key)} className="chip" aria-pressed={sourceFilter === st.key}>
-                  {st.label}
-                </button>
-              ))}
-            </div>
-            {unseenCount > 0 && (
-              <button type="button" onClick={handleMarkAllSeen} className="btn btn-text btn-sm">
-                <Icon name="check" className="w-5 h-5" />Marcar todo leído
+      {/* Temas y personas */}
+      <section className="space-y-3 pt-2" aria-label="Temas y personas">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="title-lg">Temas y personas</h2>
+          <button type="button" onClick={() => openNew('tema')} className="btn btn-tonal btn-sm"><Icon name="plus" className="w-5 h-5" />Añadir</button>
+        </div>
+        {topics.length > 0 && (
+          <div className="seg-list">
+            {topics.map(o => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => setSelected(o.id)}
+                aria-pressed={o.id === selected}
+                className={`p-4 text-left flex items-center justify-between gap-3 ${o.id === selected ? '!bg-primary-container text-on-primary-container' : ''}`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className={`w-3 h-3 rounded-full shrink-0 ${o.active ? 'bg-success' : 'bg-outline'}`} />
+                  <span className="title-md truncate">{o.name}</span>
+                  <span className="tag">{o.kind === 'persona' ? 'Persona' : 'Tema'}</span>
+                </span>
+                {o.unseen > 0 && <span className="tag tag-accent">{o.unseen}</span>}
               </button>
-            )}
+            ))}
           </div>
+        )}
+      </section>
 
-          {hitsLoading ? (
-            <div className="flex justify-center py-10 text-primary"><Spinner className="w-7 h-7" /></div>
-          ) : hits.length === 0 ? (
-            <EmptyState
-              icon="eye"
-              text={orgs.length === 0 ? 'Agrega una organización para empezar.' : 'Aún no hay menciones. Toca «Buscar ahora».'}
-            />
-          ) : (
-            <div className="stagger grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
-              {hits.map(hit => (
-                <HitCard key={hit.id} hit={hit} onMarkSeen={() => handleMarkSeen(hit.id)} onDelete={() => handleDeleteHit(hit.id)} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* La acción principal */}
       <div className="fab-slot">
-        <button type="button" onClick={handleTriggerScan} disabled={scanning || orgs.length === 0} className="fab disabled:opacity-50">
+        <button type="button" onClick={scan} disabled={scanning || orgs.length === 0} className="fab disabled:opacity-50">
           {scanning ? <Spinner className="w-6 h-6" /> : <Icon name="search" className="w-6 h-6" />}
           {scanning ? 'Buscando...' : 'Buscar ahora'}
         </button>
       </div>
 
-      {showAddOrg && (
-        <Modal title={editingOrg ? 'Editar organización' : 'Nueva organización'} onClose={closeOrgModal}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="wo-name" className="field-label">Nombre</label>
-              <input id="wo-name" type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej. Vimenti" className="field" autoFocus />
-            </div>
-            <div>
-              <label htmlFor="wo-web" className="field-label">Página web</label>
-              <input id="wo-web" type="url" value={formWebsite} onChange={e => setFormWebsite(e.target.value)} placeholder="https://www.ejemplo.org/" className="field" />
-            </div>
-            <div>
-              <label htmlFor="wo-kw" className="field-label">Palabras clave (separadas por coma)</label>
-              <textarea id="wo-kw" value={formKeywords} onChange={e => setFormKeywords(e.target.value)} placeholder="Vimenti, educación, niños" rows={3} className="field" />
-              {formKeywords && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {formKeywords.split(',').map(k => k.trim()).filter(Boolean).map((kw, i) => (
-                    <span key={i} className="tag tag-primary">{kw}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <label htmlFor="wo-yt" className="field-label">Canales de YouTube (uno por línea)</label>
-              <textarea id="wo-yt" value={formYouTube} onChange={e => setFormYouTube(e.target.value)} placeholder="UCxxxxxxxxxxxxxx" rows={2} className="field" />
-            </div>
-          </div>
+      {form && (
+        <Modal title={editing ? `Editar ${editing.name}` : form.kind === 'marca' ? 'Nueva marca' : 'Nuevo tema o persona'} onClose={closeForm}>
+          <OrgForm form={form} setForm={setForm} />
+          {error && <div className="mt-4"><Notice>{error}</Notice></div>}
           <div className="mt-6 flex justify-end gap-2">
-            <button type="button" onClick={closeOrgModal} className="btn btn-text">Cancelar</button>
-            <button type="button" onClick={handleSaveOrg} disabled={!formName.trim()} className="btn btn-filled">{editingOrg ? 'Guardar' : 'Crear'}</button>
+            <button type="button" onClick={closeForm} className="btn btn-text">Cancelar</button>
+            <button type="button" onClick={save} disabled={!form.name.trim() || saving} className="btn btn-filled">{saving ? 'Guardando...' : editing ? 'Guardar' : 'Crear'}</button>
           </div>
         </Modal>
       )}
 
-      {showRSSModal && (
-        <Modal title="Feed RSS" onClose={() => setShowRSSModal(false)}>
-          <p className="text-sm text-on-surface-variant mb-4">Pega este enlace en tu lector de noticias para recibir las menciones.</p>
+      {showRSS && (
+        <Modal title="Feed RSS" onClose={() => setShowRSS(false)}>
           <div className="flex items-center gap-2">
             <input type="text" readOnly value={feedURL} aria-label="Enlace del feed" className="field font-mono text-xs select-all" onFocus={e => e.target.select()} />
-            <button type="button" onClick={handleCopyFeedURL} className={`btn btn-sm shrink-0 ${feedCopied ? 'btn-tonal' : 'btn-filled'}`}>
+            <button
+              type="button"
+              onClick={async () => { try { await navigator.clipboard.writeText(feedURL); setFeedCopied(true); } catch { /* nada */ } }}
+              className={`btn btn-sm shrink-0 ${feedCopied ? 'btn-tonal' : 'btn-filled'}`}
+            >
               {feedCopied ? 'Copiado' : 'Copiar'}
             </button>
           </div>
           <div className="mt-4">
-            <button type="button" onClick={handleRegenerateFeed} disabled={regenerating} className="btn btn-danger btn-sm">
-              {regenerating ? 'Cambiando...' : 'Cambiar enlace'}
+            <button
+              type="button"
+              onClick={async () => { try { const d = await api.regenerateWatchlistFeedURL(); setFeedURL(window.location.origin + d.url); setFeedCopied(false); } catch { /* nada */ } }}
+              className="btn btn-danger btn-sm"
+            >
+              Cambiar enlace
             </button>
-            <p className="text-xs text-on-surface-variant mt-2">El enlace anterior dejará de servir.</p>
           </div>
         </Modal>
       )}
@@ -471,53 +652,31 @@ export default function WatchlistManager() {
 
 // ── Mención ──────────────────────────────────────────────────────
 
-function HitCard({
-  hit,
-  onMarkSeen,
-  onDelete,
-}: {
-  hit: WatchlistHit;
-  onMarkSeen: () => void;
-  onDelete: () => void;
-}) {
+function HitCard({ hit, onSeen, onDelete }: { hit: WatchlistHit; onSeen: () => void; onDelete: () => void }) {
+  let host = '';
+  try { host = new URL(hit.url).hostname.replace(/^www\./, ''); } catch { /* sin host */ }
   return (
     <article className={`flex flex-col overflow-hidden rounded-[28px] hover:rounded-[36px] transition-[border-radius,background-color] duration-500 ease-[var(--spring)] ${hit.seen ? 'bg-surface-container-low' : 'bg-surface-container ring-[3px] ring-tertiary'}`}>
-      <div className="px-5 pt-5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant min-w-0">
-          <SourceIcon type={hit.source_type} className="w-5 h-5 shrink-0" />
-          <span className="uppercase tracking-wider">{SOURCE_LABELS[hit.source_type] || hit.source_type}</span>
-          {hit.org_name && (
-            <>
-              <span aria-hidden="true">&middot;</span>
-              <span className="truncate">{hit.org_name}</span>
-            </>
-          )}
-        </div>
-        <span className="text-xs font-semibold text-on-surface-variant shrink-0">{timeAgo(hit.created_at)}</span>
+      <div className="px-5 pt-5 flex items-center justify-between gap-2 text-xs font-semibold text-on-surface-variant">
+        <span className="truncate">{host}</span>
+        <span className="shrink-0">{timeAgo(hitDate(hit))}</span>
       </div>
-
-      <h3 className="px-5 pt-3 text-lg font-extrabold leading-tight tracking-tight line-clamp-3">
-        <a href={hit.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">
-          {hit.title || 'Sin título'}
-        </a>
-      </h3>
-
-      {hit.snippet && <p className="px-5 pt-2 text-sm text-on-surface-variant leading-relaxed line-clamp-3">{hit.snippet}</p>}
-
+      <h4 className="px-5 pt-2 text-lg font-extrabold leading-tight tracking-tight line-clamp-3">
+        <a href={hit.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">{hit.title || 'Sin título'}</a>
+      </h4>
+      {hit.snippet && hit.snippet !== hit.title && <p className="px-5 pt-2 text-sm text-on-surface-variant leading-relaxed line-clamp-3">{hit.snippet}</p>}
+      {(hit.matched_hashtag || hit.matched_person) && (
+        <div className="px-5 pt-2 flex flex-wrap gap-1.5">
+          {hit.matched_person && <span className="tag tag-accent">{hit.matched_person}</span>}
+          {hit.matched_hashtag && <span className="tag tag-primary">#{hit.matched_hashtag}</span>}
+        </div>
+      )}
       <div className="flex items-center gap-2 p-3 pt-4">
         {!hit.seen && (
-          <button type="button" onClick={onMarkSeen} className="btn btn-filled btn-sm">
-            <Icon name="check" className="w-5 h-5" />Leído
-          </button>
+          <button type="button" onClick={onSeen} className="btn btn-filled btn-sm"><Icon name="check" className="w-5 h-5" />Marcar visto</button>
         )}
-        <button type="button" onClick={onDelete} className="btn btn-soft btn-sm" title="Quitar">
-          <Icon name="trash" className="w-5 h-5" />Quitar
-        </button>
-        {hit.url && (
-          <a href={hit.url} target="_blank" rel="noopener noreferrer" className="icon-btn ml-auto" title="Abrir original" aria-label="Abrir original">
-            <Icon name="open" />
-          </a>
-        )}
+        <button type="button" onClick={onDelete} className="btn btn-soft btn-sm"><Icon name="trash" className="w-5 h-5" />Quitar</button>
+        <a href={hit.url} target="_blank" rel="noopener noreferrer" className="icon-btn ml-auto" title="Abrir original" aria-label="Abrir original"><Icon name="open" /></a>
       </div>
     </article>
   );

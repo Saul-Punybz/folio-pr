@@ -32,6 +32,7 @@ import (
 	folio "github.com/Saul-Punybz/folio"
 	"github.com/Saul-Punybz/folio/internal/config"
 	"github.com/Saul-Punybz/folio/internal/db"
+	"github.com/Saul-Punybz/folio/internal/watch"
 )
 
 func main() {
@@ -150,6 +151,8 @@ func runServer(ctx context.Context, o serverOptions) error {
 		return fmt.Errorf("carpeta de datos %s: %w", o.dataDir, err)
 	}
 	st := newStores(pool, o.dataDir)
+	// Plantilla de marcas (idempotente; si aún no hay admin, entra luego).
+	watch.SeedBrandTemplates(context.Background(), st.watchOrgs)
 
 	// Cron. jobCtx se cancela al apagar para que los trabajos en curso paren.
 	jobCtx, jobCancel := context.WithCancel(context.Background())

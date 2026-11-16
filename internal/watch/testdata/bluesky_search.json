@@ -1,0 +1,353 @@
+{
+ "posts": [
+  {
+   "uri": "at://did:plc:gdczlb6yybufosshxppgkp4y/app.bsky.feed.post/3mxcz3nqepj2j",
+   "cid": "bafyreia52psrlyfrpnouh2lvdiegz4rjmyk2yqs5kxevs72faw7e7mgwk4",
+   "indexedAt": "2026-10-07T22:37:40.267Z",
+   "author": {
+    "did": "did:plc:gdczlb6yybufosshxppgkp4y",
+    "handle": "noticiasenlineapr.bsky.social",
+    "displayName": "Noticias en Línea Puerto Rico"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "Comisionado Residente entrega a Vimenti subvención federal de $1,031,000 para desarrollar bibliotecas y espacios STEM…\n\nhttps://nelpr.com/2026/10/07/comisionado-residente-entrega-a-vimenti-subvencion-federal-de-1031000-para-desarrollar-bibliotecas-y-espacios-stem-en-cuatro-escuelas-de-puerto-rico/",
+    "createdAt": "2026-10-07T22:37:39Z",
+    "facets": [
+     {
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#link",
+        "uri": "https://nelpr.com/2026/10/07/comisionado-residente-entrega-a-vimenti-subvencion-federal-de-1031000-para-desarrollar-bibliotecas-y-espacios-stem-en-cuatro-escuelas-de-puerto-rico/"
+       }
+      ],
+      "index": {
+       "byteEnd": 301,
+       "byteStart": 123
+      }
+     }
+    ],
+    "embed": {
+     "$type": "app.bsky.embed.external",
+     "external": {
+      "uri": "https://nelpr.com/2026/10/07/comisionado-residente-entrega-a-vimenti-subvencion-federal-de-1031000-para-desarrollar-bibliotecas-y-espacios-stem-en-cuatro-escuelas-de-puerto-rico/",
+      "title": "Comisionado Residente entrega a Vimenti subvención federal de $1,031,000 para desarrollar bibliotecas y espacios STEM en cuatro escuelas de Puerto Rico",
+      "description": "San Juan – Vimenti anunció recientemente que solicitó y obtuvo la aprobación del proyecto Next Generation STEM Learning Lab Accelerator, una subvención de $1,031,000 otorgada por el Comité de Apropiaciones del Congreso de los Estados Unidos para el desarrollo de bibliotecas y espacios STEM. Los fondos, gestionados mediante una solicitud de Financiamiento para Proyectos Comunitarios (Community Project Funding) presentada por la Oficina del comisionado residente en Washington, Pablo José Hernández Rivera, beneficiarán a Vimenti y a tres escuelas adicionales dentro del programa de Escuelas Comunitarias de Servicio Completo (Full-Service Community Schools o FSCS) en Puerto Rico."
+     }
+    }
+   }
+  },
+  {
+   "uri": "at://did:plc:ljbfgkecckxycbpcuxvj4iiw/app.bsky.feed.post/3mxcymh7pnk23",
+   "cid": "bafyreich5wd2hcjf76dotn7ubzmobkcq5uz5vdwkaabfgiyvie3r2cktsi",
+   "indexedAt": "2026-10-07T22:29:10.356Z",
+   "author": {
+    "did": "did:plc:ljbfgkecckxycbpcuxvj4iiw",
+    "handle": "nff-news.bsky.social",
+    "displayName": "Nonprofit Finance Fund"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "Boys & Girls Clubs of Puerto Rico's commitment to community investment is reflected in the OASIS Hub project, which is reactivating an abandoned public school in the Villa Prades neighborhood of San Juan into a modern 136,000-square-foot facility for BGCPR’s Vimenti School: nff.org/insights/oas...",
+    "createdAt": "2026-10-07T22:29:09.605Z",
+    "facets": [
+     {
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#link",
+        "uri": "https://nff.org/insights/oasis-hub/"
+       }
+      ],
+      "index": {
+       "byteEnd": 300,
+       "byteStart": 277
+      }
+     }
+    ],
+    "langs": [
+     "en"
+    ],
+    "embed": {
+     "$type": "app.bsky.embed.external",
+     "external": {
+      "uri": "https://nff.org/insights/oasis-hub/",
+      "title": "OASIS Hub - Nonprofit Finance Fund",
+      "description": "Fueling hope across generations."
+     }
+    }
+   }
+  },
+  {
+   "uri": "at://did:plc:7rtgap5v7j6sjdyho4cmjhiy/app.bsky.feed.post/3mwpya2iu3j2k",
+   "cid": "bafyreicri5olvikjmdhmyns6kaod6vaejxffx3lnyvl6vtjwalm5drf2au",
+   "indexedAt": "2026-09-30T09:01:39.160Z",
+   "author": {
+    "did": "did:plc:7rtgap5v7j6sjdyho4cmjhiy",
+    "handle": "newsismybusiness.com",
+    "displayName": "News is my Business"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "",
+    "createdAt": "2026-09-30T09:01:00+00:00",
+    "embed": {
+     "$type": "app.bsky.embed.external",
+     "external": {
+      "uri": "https://newsismybusiness.com/vimenti-starbucks-launch-5-fundraiser-for-puerto-rico-families/",
+      "title": "Vimenti, Starbucks launch $5 fundraiser for Puerto Rico families - News is My Business",
+      "description": "The “Coffee with a Purpose” campaign is expected to benefit more than 2,800 participants through Vimenti’s programs. #NewsismyBusiness - Stay updated with the latest Puerto Rico business news, economy insights, finance, retail, tourism, and more from News is my Business."
+     }
+    }
+   }
+  },
+  {
+   "uri": "at://did:plc:ylslnx2g5q3wvnvywksuxx7g/app.bsky.feed.post/3moh22hawec24",
+   "cid": "bafyreicagythipuep2hvhrds4y5dzsl6meorq7lfjj3nemof4q47otfcke",
+   "indexedAt": "2026-06-17T00:18:48.665Z",
+   "author": {
+    "did": "did:plc:ylslnx2g5q3wvnvywksuxx7g",
+    "handle": "thewelshtaffy24.bsky.social",
+    "displayName": "Tricia  \"The Welsh Daffodil \""
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "Love this 😀 \nThank you Princess-vimenti \n@bm1970.bsky.social \n@dailykotzn.bsky.social \n@jandee924.bsky.social \n@sentenne.bsky.social \n@coolsprings.bsky.social \n@wolverinecult.bsky.social \n@claynobles.bsky.social \n@mojochefjeff.bsky.social",
+    "createdAt": "2026-06-17T00:18:47.438Z",
+    "facets": [
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:rzszxtdmxjdheacieg2na2el"
+       }
+      ],
+      "index": {
+       "byteEnd": 63,
+       "byteStart": 44
+      }
+     },
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:4flg7ssoiqcsft5ptfmavao2"
+       }
+      ],
+      "index": {
+       "byteEnd": 88,
+       "byteStart": 65
+      }
+     },
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:62mq3wnxus5bclw4nrqh52gg"
+       }
+      ],
+      "index": {
+       "byteEnd": 112,
+       "byteStart": 90
+      }
+     },
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:lerdceiy7f33hqhcgfqxu3am"
+       }
+      ],
+      "index": {
+       "byteEnd": 135,
+       "byteStart": 114
+      }
+     },
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:432rnrbenueqjtxif7azozrw"
+       }
+      ],
+      "index": {
+       "byteEnd": 161,
+       "byteStart": 137
+      }
+     },
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:hla32itym3u2cnln2vas77qm"
+       }
+      ],
+      "index": {
+       "byteEnd": 189,
+       "byteStart": 163
+      }
+     },
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:rtc4q3att7stuobmlnwgukno"
+       }
+      ],
+      "index": {
+       "byteEnd": 214,
+       "byteStart": 191
+      }
+     },
+     {
+      "$type": "app.bsky.richtext.facet",
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#mention",
+        "did": "did:plc:27w7ydu4wk5roxmhqhxw2zjh"
+       }
+      ],
+      "index": {
+       "byteEnd": 241,
+       "byteStart": 216
+      }
+     }
+    ],
+    "langs": [
+     "en"
+    ]
+   }
+  },
+  {
+   "uri": "at://did:plc:ljbfgkecckxycbpcuxvj4iiw/app.bsky.feed.post/3mxcymh7pnk23",
+   "cid": "bafyreich5wd2hcjf76dotn7ubzmobkcq5uz5vdwkaabfgiyvie3r2cktsi",
+   "indexedAt": "2026-10-07T22:29:10.356Z",
+   "author": {
+    "did": "did:plc:ljbfgkecckxycbpcuxvj4iiw",
+    "handle": "nff-news.bsky.social",
+    "displayName": "Nonprofit Finance Fund"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "Boys & Girls Clubs of Puerto Rico's commitment to community investment is reflected in the OASIS Hub project, which is reactivating an abandoned public school in the Villa Prades neighborhood of San Juan into a modern 136,000-square-foot facility for BGCPR’s Vimenti School: nff.org/insights/oas...",
+    "createdAt": "2026-10-07T22:29:09.605Z",
+    "facets": [
+     {
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#link",
+        "uri": "https://nff.org/insights/oasis-hub/"
+       }
+      ],
+      "index": {
+       "byteEnd": 300,
+       "byteStart": 277
+      }
+     }
+    ],
+    "langs": [
+     "en"
+    ],
+    "embed": {
+     "$type": "app.bsky.embed.external",
+     "external": {
+      "uri": "https://nff.org/insights/oasis-hub/",
+      "title": "OASIS Hub - Nonprofit Finance Fund",
+      "description": "Fueling hope across generations."
+     }
+    }
+   }
+  },
+  {
+   "uri": "at://did:plc:4i7xwq5tgasaziqv3klq2cn7/app.bsky.feed.post/3mvoyo6wlxb2w",
+   "cid": "bafyreifl7jahiysnnylz2v2hkwy43q5md2uq7hwf4btwa3bhixulgd26tu",
+   "indexedAt": "2026-09-17T06:11:42.658Z",
+   "author": {
+    "did": "did:plc:4i7xwq5tgasaziqv3klq2cn7",
+    "handle": "a51fr3d.bsky.social",
+    "displayName": "A51FR3D"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "Low-cost food pantry awarded £272k lottery grant Oasis Hub Bath said the funding will cover its main operating costs over the next three years. https://www.bbc.co.uk/news/articles/ckgwep54wx2o?at_medium=RSS&at_campaign=rss",
+    "createdAt": "2026-09-17T06:11:37Z",
+    "facets": [
+     {
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#link",
+        "uri": "https://www.bbc.co.uk/news/articles/ckgwep54wx2o?at_medium=RSS&at_campaign=rss"
+       }
+      ],
+      "index": {
+       "byteEnd": 223,
+       "byteStart": 145
+      }
+     }
+    ]
+   }
+  },
+  {
+   "uri": "at://did:plc:d7sjua2s3ndrlyn3a4wxvyag/app.bsky.feed.post/3m5c4mrdiak2n",
+   "cid": "bafyreidabw2vjkrvvjmzou6ysf3v4rcs3u6uzpxdmfprndmcybmsz5hz7q",
+   "indexedAt": "2025-11-10T17:13:13.657Z",
+   "author": {
+    "did": "did:plc:d7sjua2s3ndrlyn3a4wxvyag",
+    "handle": "karenada59.bsky.social",
+    "displayName": "KarenA"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": "share.google/Q5YaDxQXzW3P...",
+    "createdAt": "2025-11-10T17:13:13.122Z",
+    "facets": [
+     {
+      "features": [
+       {
+        "$type": "app.bsky.richtext.facet#link",
+        "uri": "https://share.google/Q5YaDxQXzW3PCVXh1"
+       }
+      ],
+      "index": {
+       "byteEnd": 28,
+       "byteStart": 0
+      }
+     }
+    ],
+    "langs": [
+     "en"
+    ],
+    "embed": {
+     "$type": "app.bsky.embed.external",
+     "external": {
+      "uri": "https://share.google/Q5YaDxQXzW3PCVXh1",
+      "title": "Home - Oasis Hub Waterloo",
+      "description": "RADICAL COMMUNITY TRANSFORMATION We’ve been involved in the Waterloo community for over 15 years, striving to help people of all ages and situations, from all faiths and none, feel included, to know t..."
+     }
+    }
+   }
+  },
+  {
+   "uri": "at://did:plc:ov2bccocoooj4j2h36eftnkt/app.bsky.feed.post/3m55buveoho2v",
+   "cid": "bafyreidw2qr2dvgm564yxhqrkwxbs5hcsondakxf4qde25ddzdxg76fjhm",
+   "indexedAt": "2025-11-08T19:03:56.162Z",
+   "author": {
+    "did": "did:plc:ov2bccocoooj4j2h36eftnkt",
+    "handle": "razzcus.bsky.social",
+    "displayName": "Razzc LLC"
+   },
+   "record": {
+    "$type": "app.bsky.feed.post",
+    "text": " A veteran support hub in one of Australi  https://razzc.sbs/thousands-of-veterans-at-risk-as-townsvilles-oasis-hub-faces-closure/",
+    "createdAt": "2025-11-08T19:03:55+00:00"
+   }
+  }
+ ],
+ "cursor": "25"
+}

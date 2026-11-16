@@ -3,61 +3,48 @@ package watch
 import (
 	"context"
 	"log/slog"
-
-	"github.com/google/uuid"
+	"time"
 
 	"github.com/Saul-Punybz/folio/internal/models"
-	"github.com/Saul-Punybz/folio/internal/scraper"
 )
 
-// ScanLocalArticles scans recently ingested articles for keyword matches.
-func ScanLocalArticles(ctx context.Context, org models.WatchlistOrg, deps Deps) int {
-	recent, err := deps.Articles.ListRecent(ctx, 50)
+// localWindowHours: noticias de medios de PR que Folio ingirió en los últimos 14 días.
+const localWindowHours = 14 * 24
+
+// ScanLocalArticles revisa las noticias que Folio ya descargó.
+func ScanLocalArticles(ctx context.Context, org models.WatchlistOrg, m Matcher, deps Deps) int {
+	if deps.Articles == nil {
+		return 0
+	}
+	recent, err := deps.Articles.ListRecent(ctx, localWindowHours)
 	if err != nil {
 		slog.Error("watchlist/local: list recent articles", "err", err)
 		return 0
 	}
-
 	hits := 0
 	for _, article := range recent {
 		if hits >= maxResultsPerAgent || ctx.Err() != nil {
 			break
 		}
-
-		if !MatchesOrg(article.Title+" "+article.CleanText, org) {
+		mt, ok := matchItem(article.Title+" "+article.CleanText, org, m)
+		if !ok {
 			continue
 		}
-
 		if isSpamHit(article.URL, article.Title, article.CleanText) {
 			continue
 		}
-
-		urlHash := scraper.HashURL(article.URL)
 		snippet := article.Summary
 		if snippet == "" {
 			snippet = article.CleanText
 		}
-
-		hit := &models.WatchlistHit{
-			ID:         uuid.New(),
-			OrgID:      org.ID,
-			SourceType: "local",
-			Title:      article.Title,
-			URL:        article.URL,
-			URLHash:    urlHash,
-			Snippet:    truncateStr(snippet, 500),
-			Sentiment:  "unknown",
+		var pub time.Time
+		if article.PublishedAt != nil {
+			pub = *article.PublishedAt
 		}
-
-		if err := deps.Hits.Create(ctx, hit); err != nil {
-			slog.Error("watchlist/local: create hit", "err", err)
-			continue
-		}
-		if hit.ID != uuid.Nil {
+		if saveHit(ctx, deps, org, "local", mt, article.Title, article.URL, snippet, pub) {
 			hits++
 		}
 	}
-
 	if hits > 0 {
 		slog.Info("watchlist/local: done", "org", org.Name, "new_hits", hits)
 	}

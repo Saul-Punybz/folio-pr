@@ -147,6 +147,7 @@ func newRouter(st *stores, frontendFS fs.FS, hooks routerHooks) http.Handler {
 			r.Put("/orgs/{id}", watchH.UpdateOrg)
 			r.Delete("/orgs/{id}", watchH.DeleteOrg)
 			r.Patch("/orgs/{id}/toggle", watchH.ToggleOrg)
+			r.Post("/orgs/{id}/seen-all", watchH.MarkOrgSeen)
 			r.Get("/hits", watchH.ListHits)
 			r.Get("/hits/unseen", watchH.CountUnseen)
 			r.Post("/hits/{id}/seen", watchH.MarkSeen)
