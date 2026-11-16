@@ -173,6 +173,12 @@ export default function InboxFeed() {
   const [showAddSource, setShowAddSource] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  // Selección múltiple y borrado en bloque.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkUndo, setBulkUndo] = useState<{ articles: Article[]; timer: ReturnType<typeof setTimeout> } | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   // Siempre la lista vigente y el filtro de fecha, para pedir la siguiente página.
@@ -206,7 +212,7 @@ export default function InboxFeed() {
     setLoadingMore(true);
     const g = gen.current;
     try {
-      // Lo guardado, descartado o deshecho ya cambió en el servidor: el offset es lo que tenemos en pantalla.
+      // Lo guardado, borrado o deshecho ya cambió en el servidor: el offset es lo que tenemos en pantalla.
       const data = await api.getItems('inbox', PAGE, articlesRef.current.length, dateRef.current);
       if (g !== gen.current) return;
       const next = data.items || [];
@@ -254,7 +260,7 @@ export default function InboxFeed() {
     if (expandedId === id) setExpandedId(null);
     setArticles((prev) => prev.filter((a) => a.id !== id));
     setSelectedIndex((prev) => Math.min(prev, Math.max(0, articles.length - 2)));
-    const timer = setTimeout(() => { setUndoStack((prev) => prev.filter((u) => u.article.id !== id)); }, 10000);
+    const timer = setTimeout(() => { setUndoStack((prev) => prev.filter((u) => u.article.id !== id)); }, 8000);
     setUndoStack((prev) => [...prev, { article, action: 'save', timer }]);
     try { await api.saveItem(id); } catch {
       setArticles((prev) => [...prev, article].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
@@ -267,13 +273,47 @@ export default function InboxFeed() {
     if (expandedId === id) setExpandedId(null);
     setArticles((prev) => prev.filter((a) => a.id !== id));
     setSelectedIndex((prev) => Math.min(prev, Math.max(0, articles.length - 2)));
-    const timer = setTimeout(() => { setUndoStack((prev) => prev.filter((u) => u.article.id !== id)); }, 10000);
+    const timer = setTimeout(() => { setUndoStack((prev) => prev.filter((u) => u.article.id !== id)); }, 8000);
     setUndoStack((prev) => [...prev, { article, action: 'trash', timer }]);
     try { await api.trashItem(id); } catch {
       setArticles((prev) => [...prev, article].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
       setUndoStack((prev) => prev.filter((u) => u.article.id !== id)); clearTimeout(timer);
     }
   }, [articles, expandedId]);
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }, []);
+
+  const exitSelecting = () => { setSelecting(false); setSelected(new Set()); setConfirmBulk(false); };
+
+  const handleBulkTrash = async () => {
+    const ids = Array.from(selected).slice(0, 500);
+    const gone = articles.filter((a) => ids.includes(a.id));
+    if (gone.length === 0) return;
+    setBulkBusy(true);
+    try {
+      await api.trashItems(ids);
+      setArticles((prev) => prev.filter((a) => !ids.includes(a.id)));
+      setExpandedId(null);
+      setSelectedIndex(0);
+      if (bulkUndo) clearTimeout(bulkUndo.timer);
+      const timer = setTimeout(() => setBulkUndo(null), 8000);
+      setBulkUndo({ articles: gone, timer });
+      exitSelecting();
+    } catch (err: any) {
+      setError(err.message || 'No se pudieron borrar');
+    } finally { setBulkBusy(false); }
+  };
+
+  const handleBulkUndo = () => {
+    if (!bulkUndo) return;
+    clearTimeout(bulkUndo.timer);
+    const back = bulkUndo.articles;
+    setBulkUndo(null);
+    setArticles((prev) => [...prev, ...back].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+    api.undoItems(back.map((a) => a.id)).catch(() => {});
+  };
 
   const handlePin = useCallback(async (id: string) => {
     setArticles((prev) => prev.map((a) => (a.id === id ? { ...a, pinned: !a.pinned } : a)));
@@ -371,6 +411,9 @@ export default function InboxFeed() {
           <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Buscar en el Inbox" aria-label="Buscar en el Inbox" className="field pl-12" />
         </div>
         <div className="flex items-center gap-2 ml-auto">
+          <button type="button" onClick={() => (selecting ? exitSelecting() : setSelecting(true))} className="btn btn-soft btn-sm" aria-pressed={selecting}>
+            {selecting ? 'Listo' : 'Seleccionar'}
+          </button>
           <button type="button" onClick={() => setShowAddSource(true)} className="btn btn-tonal btn-sm" title="Agregar fuente">
             <Icon name="plus" className="w-5 h-5" /><span className="hidden sm:inline">Fuente</span>
           </button>
@@ -430,11 +473,22 @@ export default function InboxFeed() {
         </EmptyState>
       )}
 
+      {selecting && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-sm font-semibold text-on-surface-variant">{selected.size} {selected.size === 1 ? 'seleccionada' : 'seleccionadas'}</span>
+          <button type="button" className="btn btn-soft btn-sm" onClick={() => setSelected(new Set(filteredArticles.slice(0, 500).map((a) => a.id)))}>Seleccionar todo lo visible</button>
+          {selected.size > 0 && <button type="button" className="btn btn-text btn-sm" onClick={() => setSelected(new Set())}>Quitar selección</button>}
+          <button type="button" disabled={selected.size === 0} className="btn btn-danger btn-sm ml-auto disabled:opacity-60" onClick={() => setConfirmBulk(true)}>
+            <Icon name="trash" className="w-5 h-5" />Borrar seleccionadas
+          </button>
+        </div>
+      )}
+
       {/* Noticias */}
       <div ref={listRef} className="stagger grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {filteredArticles.map((article, index) => (
           <div key={article.id} data-article-card>
-            <ArticleCard article={article} selected={index === selectedIndex} onSave={handleSave} onTrash={handleTrash} onPin={handlePin} onClick={() => handleCardClick(index, article.id)} showActions />
+            <ArticleCard article={article} selected={index === selectedIndex} onSave={handleSave} onTrash={handleTrash} onPin={handlePin} onClick={() => handleCardClick(index, article.id)} showActions selecting={selecting} checked={selected.has(article.id)} onToggle={toggleSelected} />
           </div>
         ))}
       </div>
@@ -472,7 +526,7 @@ export default function InboxFeed() {
                     <Icon name="save" className="w-5 h-5" />Guardar
                   </button>
                   <button type="button" onClick={() => handleTrash(expandedArticle.id)} className="btn btn-soft btn-sm">
-                    <Icon name="trash" className="w-5 h-5" />Descartar
+                    <Icon name="trash" className="w-5 h-5" />Borrar
                   </button>
                   <button type="button" onClick={() => handlePin(expandedArticle.id)} className={`btn btn-sm ${expandedArticle.pinned ? 'btn-accent' : 'btn-soft'}`} aria-pressed={!!expandedArticle.pinned}>
                     <Icon name="pin" className="w-5 h-5" fill={!!expandedArticle.pinned} />{expandedArticle.pinned ? 'Fijado' : 'Fijar'}
@@ -526,11 +580,27 @@ export default function InboxFeed() {
       {showAddSource && <QuickAddSourceModal onClose={() => setShowAddSource(false)} onCreated={fetchSources} />}
       {showCollect && <CollectModal onClose={() => setShowCollect(false)} onCollected={fetchItems} />}
 
-      {undoStack.length > 0 && (
+      {confirmBulk && (
+        <Modal title="Borrar noticias" onClose={() => setConfirmBulk(false)}>
+          <p className="text-base mb-5">¿Borrar {selected.size} {selected.size === 1 ? 'noticia' : 'noticias'}? No volverán a aparecer.</p>
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" onClick={() => setConfirmBulk(false)} className="btn btn-text">Cancelar</button>
+            <button type="button" onClick={handleBulkTrash} disabled={bulkBusy} className="btn btn-danger">{bulkBusy ? 'Borrando...' : 'Borrar'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {(undoStack.length > 0 || bulkUndo) && (
         <div className="snack-stack" role="status" aria-live="polite">
+          {bulkUndo && (
+            <div className="snack toast-enter">
+              <span>Borradas: <span className="font-bold">{bulkUndo.articles.length}</span></span>
+              <button type="button" onClick={handleBulkUndo} className="btn btn-text btn-sm">Deshacer</button>
+            </div>
+          )}
           {undoStack.map((entry) => (
             <div key={entry.article.id} className="snack toast-enter">
-              <span>{entry.action === 'save' ? 'Guardada' : 'Descartada'}: <span className="font-bold">{entry.article.title.length > 30 ? entry.article.title.slice(0, 30) + '...' : entry.article.title}</span></span>
+              <span>{entry.action === 'save' ? 'Guardada' : 'Borrada'}: <span className="font-bold">{entry.article.title.length > 30 ? entry.article.title.slice(0, 30) + '...' : entry.article.title}</span></span>
               <button type="button" onClick={() => handleUndo(entry.article.id)} className="btn btn-text btn-sm">Deshacer</button>
             </div>
           ))}

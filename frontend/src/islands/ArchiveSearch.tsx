@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type Article } from '../lib/api';
-import { regionColor, statusColor, isExpired, formatDate, debounce } from '../lib/utils';
+import { statusColor, formatDate, debounce } from '../lib/utils';
 import { useNearEnd } from '../lib/useNearEnd';
-import { Icon, Spinner, EmptyState, tagLabel } from './ui';
+import { Icon, Spinner, EmptyState, Modal, tagLabel } from './ui';
 
 const TAG_OPTIONS = [
   'politics', 'economy', 'health', 'education', 'infrastructure',
@@ -13,7 +13,12 @@ const TAG_OPTIONS = [
 export default function ArchiveSearch() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Article[]>([]);
-  const [total, setTotal] = useState(0);
+  const [hasMoreServer, setHasMoreServer] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [undoEntry, setUndoEntry] = useState<{ ids: string[]; articles: Article[]; timer: ReturnType<typeof setTimeout> } | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -34,10 +39,8 @@ export default function ArchiveSearch() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const q = params.get('q');
-    if (q) {
-      setQuery(q);
-      performSearch(q, '', '', '', '', '', 0);
-    }
+    if (q) setQuery(q);
+    performSearch(q || '', '', '', '', '', '', 0);
     inputRef.current?.focus();
   }, []);
 
@@ -76,7 +79,7 @@ export default function ArchiveSearch() {
         } else {
           setResults((prev) => [...prev, ...(data.results || [])]);
         }
-        setTotal(data.total || 0);
+        setHasMoreServer((data.results || []).length >= limit);
         setOffset(searchOffset);
       } catch (err: any) {
         console.error('Search error:', err);
@@ -98,19 +101,55 @@ export default function ArchiveSearch() {
 
   // Trigger search on filter changes
   useEffect(() => {
-    if (query.trim() || dateFrom || dateTo || regionFilter || statusFilter || tagFilter) {
-      debouncedSearch(query, dateFrom, dateTo, regionFilter, statusFilter, tagFilter);
-    }
+    debouncedSearch(query, dateFrom, dateTo, regionFilter, statusFilter, tagFilter);
   }, [query, dateFrom, dateTo, regionFilter, statusFilter, tagFilter, debouncedSearch]);
 
   const loadMore = () => {
     performSearch(query, dateFrom, dateTo, regionFilter, statusFilter, tagFilter, offset + limit);
   };
 
-  const hasMore = results.length < total;
+  const hasMore = hasMoreServer;
   const sentinelRef = useNearEnd(loadMore, hasMore && !loading && !loadingMore);
 
-  const STATUS_LABELS: Record<string, string> = { saved: 'Guardada', trashed: 'Descartada', inbox: 'Inbox', archived: 'Archivada' };
+  const STATUS_LABELS: Record<string, string> = { saved: 'Guardada', inbox: 'Nueva', archived: 'Archivada' };
+  const toggleSelected = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const exitSelecting = () => { setSelecting(false); setSelected(new Set()); setConfirmBulk(false); };
+
+  const trashIds = async (ids: string[]) => {
+    const gone = results.filter((a) => ids.includes(a.id));
+    if (gone.length === 0) return;
+    try {
+      if (ids.length === 1) await api.trashItem(ids[0]); else await api.trashItems(ids);
+    } catch { return; }
+    setResults((prev) => prev.filter((a) => !ids.includes(a.id)));
+    if (undoEntry) clearTimeout(undoEntry.timer);
+    const timer = setTimeout(() => setUndoEntry(null), 8000);
+    setUndoEntry({ ids, articles: gone, timer });
+  };
+
+  const bulkTrash = async () => {
+    setBulkBusy(true);
+    await trashIds(Array.from(selected).slice(0, 500));
+    setBulkBusy(false);
+    exitSelecting();
+  };
+
+  const undoTrash = () => {
+    if (!undoEntry) return;
+    clearTimeout(undoEntry.timer);
+    const back = undoEntry.articles;
+    setUndoEntry(null);
+    setResults((prev) => [...prev, ...back].sort((a, b) => new Date(b.published_at || b.created_at).getTime() - new Date(a.published_at || a.created_at).getTime()));
+    api.undoItems(back.map((a) => a.id)).catch(() => {});
+  };
+
+  const saveOne = async (id: string) => {
+    setResults((prev) => prev.map((a) => (a.id === id ? { ...a, status: 'saved' } : a)));
+    try { await api.saveItem(id); } catch {
+      setResults((prev) => prev.map((a) => (a.id === id ? { ...a, status: 'archived' } : a)));
+    }
+  };
+
   const hasFilters = !!(dateFrom || dateTo || regionFilter || statusFilter || tagFilter);
 
   return (
@@ -140,10 +179,9 @@ export default function ArchiveSearch() {
 
       <div className="space-y-3">
         <div className="chip-row chip-scroll" role="group" aria-label="Estado">
-          <button type="button" className="chip" aria-pressed={statusFilter === ''} onClick={() => setStatusFilter('')}>Todo</button>
-          {(['saved', 'inbox', 'trashed'] as const).map((st) => (
-            <button key={st} type="button" className="chip" aria-pressed={statusFilter === st} onClick={() => setStatusFilter(statusFilter === st ? '' : st)}>{STATUS_LABELS[st]}</button>
-          ))}
+          <button type="button" className="chip" aria-pressed={statusFilter === ''} onClick={() => setStatusFilter('')}>Todas</button>
+          <button type="button" className="chip" aria-pressed={statusFilter === 'saved'} onClick={() => setStatusFilter('saved')}>Guardadas</button>
+          <button type="button" className="chip" aria-pressed={statusFilter === 'archived'} onClick={() => setStatusFilter('archived')}>Archivadas</button>
         </div>
         <div className="chip-row chip-scroll" role="group" aria-label="Región">
           <button type="button" className="chip" aria-pressed={regionFilter === ''} onClick={() => setRegionFilter('')}>Todas las regiones</button>
@@ -179,11 +217,26 @@ export default function ArchiveSearch() {
 
       {hasSearched && !loading && (
         <p className="text-sm font-semibold text-on-surface-variant">
-          {total} {total === 1 ? 'resultado' : 'resultados'}
+          {results.length}{hasMore ? '+' : ''} {results.length === 1 ? 'resultado' : 'resultados'}
           {query && ` para «${query}»`}
           {tagFilter && ` en ${tagLabel(tagFilter)}`}
         </p>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn btn-soft btn-sm" aria-pressed={selecting} onClick={() => (selecting ? exitSelecting() : setSelecting(true))}>
+          {selecting ? 'Listo' : 'Seleccionar'}
+        </button>
+        {selecting && (
+          <>
+            <span className="text-sm font-semibold text-on-surface-variant">{selected.size} {selected.size === 1 ? 'seleccionada' : 'seleccionadas'}</span>
+            <button type="button" className="btn btn-soft btn-sm" onClick={() => setSelected(new Set(results.slice(0, 500).map((a) => a.id)))}>Seleccionar todo lo visible</button>
+            <button type="button" disabled={selected.size === 0} className="btn btn-danger btn-sm ml-auto disabled:opacity-60" onClick={() => setConfirmBulk(true)}>
+              <Icon name="trash" className="w-5 h-5" />Borrar seleccionadas
+            </button>
+          </>
+        )}
+      </div>
 
       {loading && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -205,13 +258,13 @@ export default function ArchiveSearch() {
         <div className="stagger grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {results.map((article) => {
             const status = statusColor(article.status);
-            const expired = isExpired(article.evidence_expires_at);
             const description = article.summary || (article.clean_text ? article.clean_text.slice(0, 160) + '...' : '');
 
             return (
-              <article key={article.id} className="flex flex-col h-full overflow-hidden bg-surface-container-low hover:bg-surface-container rounded-[28px] hover:rounded-[36px] transition-[border-radius,background-color] duration-500 ease-[var(--spring)]">
+              <article key={article.id} onClick={selecting ? () => toggleSelected(article.id) : undefined} className={`${selected.has(article.id) ? 'ring-[3px] ring-primary ' : ''}flex flex-col h-full overflow-hidden bg-surface-container-low hover:bg-surface-container rounded-[28px] hover:rounded-[36px] transition-[border-radius,background-color] duration-500 ease-[var(--spring)]`}>
                 <div className="px-5 pt-5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 text-xs text-on-surface-variant min-w-0">
+                    {selecting && <input type="checkbox" checked={selected.has(article.id)} onChange={() => toggleSelected(article.id)} onClick={(e) => e.stopPropagation()} aria-label={`Seleccionar: ${article.title}`} className="shrink-0" />}
                     <span className="font-semibold truncate">{article.source}</span>
                     <span aria-hidden="true">&middot;</span>
                     <span className="shrink-0">{formatDate(article.created_at)}</span>
@@ -250,9 +303,18 @@ export default function ArchiveSearch() {
                   </div>
                 )}
 
-                <div className="p-4 min-h-[16px]">
-                  {expired && <span className="tag tag-accent">Vencido</span>}
-                </div>
+                {!selecting && (
+                  <div className="flex items-center gap-2 p-3 pt-4">
+                    {article.status !== 'saved' && (
+                      <button type="button" onClick={() => saveOne(article.id)} className="btn btn-filled btn-sm flex-1">
+                        <Icon name="save" className="w-5 h-5" />Guardar
+                      </button>
+                    )}
+                    <button type="button" onClick={() => trashIds([article.id])} className="btn btn-soft btn-sm">
+                      <Icon name="trash" className="w-5 h-5" />Borrar
+                    </button>
+                  </div>
+                )}
               </article>
             );
           })}
@@ -262,13 +324,28 @@ export default function ArchiveSearch() {
       {hasMore && !loading && (
         <div ref={sentinelRef} className="flex justify-center pt-4">
           <button type="button" onClick={loadMore} disabled={loadingMore} className="btn btn-tonal">
-            {loadingMore ? (<><Spinner className="w-5 h-5" />Cargando...</>) : `Ver más (${results.length} de ${total})`}
+            {loadingMore ? (<><Spinner className="w-5 h-5" />Cargando...</>) : 'Ver más'}
           </button>
         </div>
       )}
 
-      {!hasSearched && (
-        <EmptyState icon="search" text="Escribe una palabra para buscar en todo el archivo." />
+      {confirmBulk && (
+        <Modal title="Borrar noticias" onClose={() => setConfirmBulk(false)}>
+          <p className="text-base mb-5">¿Borrar {selected.size} {selected.size === 1 ? 'noticia' : 'noticias'}? No volverán a aparecer.</p>
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" onClick={() => setConfirmBulk(false)} className="btn btn-text">Cancelar</button>
+            <button type="button" onClick={bulkTrash} disabled={bulkBusy} className="btn btn-danger">{bulkBusy ? 'Borrando...' : 'Borrar'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {undoEntry && (
+        <div className="snack-stack" role="status" aria-live="polite">
+          <div className="snack toast-enter">
+            <span>Borrada{undoEntry.articles.length > 1 ? 's' : ''}: <span className="font-bold">{undoEntry.articles.length}</span></span>
+            <button type="button" onClick={undoTrash} className="btn btn-text btn-sm">Deshacer</button>
+          </div>
+        </div>
       )}
     </div>
   );

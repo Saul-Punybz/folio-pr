@@ -20,8 +20,9 @@ const (
 	// maxPerSource is the maximum number of articles to ingest per source per run.
 	maxPerSource = 25
 
-	// defaultEvidencePolicy is the default retention policy for new articles.
-	defaultEvidencePolicy = "ret_3m"
+	// defaultEvidencePolicy: nada caduca solo; lo único que elimina una
+	// noticia es «Borrar» (a mano).
+	defaultEvidencePolicy = "keep"
 )
 
 // DiscoveredArticle holds structured data from feed discovery. For RSS feeds,
@@ -224,6 +225,13 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 
 			// Create fingerprint record.
 			contentHash := HashContent(cleanText)
+			// Una noticia borrada a mano no vuelve por otra URL con el mismo texto.
+			if strings.TrimSpace(cleanText) != "" {
+				if blockedText, err := stores.Fingerprints.ContentBlocked(ctx, contentHash); err == nil && blockedText {
+					slog.Debug("ingestion: skipping (content blocked)", "url", rawURL)
+					continue
+				}
+			}
 			fp := &models.Fingerprint{
 				CanonicalURLHash: urlHash,
 				ContentHash:      contentHash,
@@ -233,27 +241,23 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 				continue
 			}
 
-			// Determine evidence expiry based on policy.
-			evidenceExpiry := evidenceExpiryTime(defaultEvidencePolicy)
-
 			// Create the article record.
 			srcID := src.ID
 			article := &models.Article{
-				ID:                uuid.New(),
-				Title:             title,
-				Source:            src.Name,
-				SourceID:          &srcID,
-				URL:               rawURL,
-				CanonicalURL:      canonical,
-				Region:            src.Region,
-				PublishedAt:       timePtr(publishedAt),
-				CleanText:         cleanText,
-				Summary:           RuleSummary(da.Description, MetaDescription(rawHTML), FirstParagraph(cleanText)),
-				Tags:              NormalizeTags(da.Categories),
-				ImageURL:          imageURL,
-				Status:            "inbox",
-				EvidencePolicy:    defaultEvidencePolicy,
-				EvidenceExpiresAt: evidenceExpiry,
+				ID:             uuid.New(),
+				Title:          title,
+				Source:         src.Name,
+				SourceID:       &srcID,
+				URL:            rawURL,
+				CanonicalURL:   canonical,
+				Region:         src.Region,
+				PublishedAt:    timePtr(publishedAt),
+				CleanText:      cleanText,
+				Summary:        RuleSummary(da.Description, MetaDescription(rawHTML), FirstParagraph(cleanText)),
+				Tags:           NormalizeTags(da.Categories),
+				ImageURL:       imageURL,
+				Status:         "inbox",
+				EvidencePolicy: defaultEvidencePolicy,
 			}
 
 			if err := stores.Articles.Create(ctx, article); err != nil {
@@ -359,27 +363,6 @@ func RunSessionCleanup(ctx context.Context, sessionStore *models.SessionStore) {
 	}
 
 	slog.Info("session cleanup: complete")
-}
-
-// evidenceExpiryTime calculates the evidence expiry time based on the policy.
-func evidenceExpiryTime(policy string) *time.Time {
-	now := time.Now().UTC()
-	var expiry time.Time
-
-	switch policy {
-	case "ret_3m":
-		expiry = now.AddDate(0, 3, 0)
-	case "ret_6m":
-		expiry = now.AddDate(0, 6, 0)
-	case "ret_12m":
-		expiry = now.AddDate(1, 0, 0)
-	case "keep":
-		return nil // Never expires.
-	default:
-		expiry = now.AddDate(0, 3, 0) // Default to 3 months.
-	}
-
-	return &expiry
 }
 
 // timePtr returns a pointer to the given time, or nil if it is the zero value.

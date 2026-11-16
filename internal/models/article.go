@@ -70,6 +70,10 @@ func (s *ArticleStore) ListByStatus(ctx context.Context, status string, limit, o
 	args = append(args, status)
 	where := "WHERE status = $1"
 	argN := 2
+	if status == "inbox" {
+		// El Inbox muestra solo la última semana; lo anterior ya pasó a Archivo.
+		where += " AND created_at >= now() - interval '7 days'"
+	}
 
 	if dateFrom != nil {
 		where += fmt.Sprintf(" AND COALESCE(published_at, created_at) >= $%d", argN)
@@ -163,7 +167,10 @@ func (s *ArticleStore) GetByID(ctx context.Context, id uuid.UUID) (*Article, err
 
 // UpdateStatus changes an article's status.
 func (s *ArticleStore) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE articles SET status = $1 WHERE id = $2`, status, id)
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE articles SET status = $1,
+		       trashed_at = CASE WHEN $1 = 'trashed' THEN now() ELSE NULL END
+		WHERE id = $2`, status, id)
 	if err != nil {
 		return fmt.Errorf("article update status: %w", err)
 	}
@@ -244,7 +251,7 @@ func (s *ArticleStore) ListRecent(ctx context.Context, hours int) ([]Article, er
 		       clean_text, summary, image_url, status, pinned, evidence_policy,
 		       evidence_expires_at, tags, created_at
 		FROM articles
-		WHERE created_at >= now() - make_interval(hours => $1)
+		WHERE status <> 'trashed' AND created_at >= now() - make_interval(hours => $1)
 		ORDER BY created_at DESC
 	`, hours)
 	if err != nil {
@@ -262,36 +269,6 @@ func (s *ArticleStore) ListRecent(ctx context.Context, hours int) ([]Article, er
 	}
 
 	return articles, rows.Err()
-}
-
-// UpdateRetention updates the evidence policy and recalculates the expiry date.
-func (s *ArticleStore) UpdateRetention(ctx context.Context, id uuid.UUID, policy string) error {
-	var expiresAt *time.Time
-	now := time.Now().UTC()
-
-	switch policy {
-	case "ret_6m":
-		t := now.AddDate(0, 6, 0)
-		expiresAt = &t
-	case "ret_12m":
-		t := now.AddDate(1, 0, 0)
-		expiresAt = &t
-	case "keep":
-		expiresAt = nil
-	default:
-		return fmt.Errorf("article update retention: invalid policy %q", policy)
-	}
-
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE articles SET evidence_policy = $1, evidence_expires_at = $2 WHERE id = $3
-	`, policy, expiresAt, id)
-	if err != nil {
-		return fmt.Errorf("article update retention: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("article not found: %s", id)
-	}
-	return nil
 }
 
 // CountToday returns the number of articles created since the start of today (UTC).
@@ -355,10 +332,14 @@ func (s *ArticleStore) Search(ctx context.Context, query string, from, to time.T
 		args = append(args, region)
 		argN++
 	}
-	if status != "" {
+	// Archivo busca en lo nuevo, lo guardado y lo archivado; nunca en lo borrado.
+	switch status {
+	case "inbox", "saved", "archived":
 		conditions = append(conditions, fmt.Sprintf("status = $%d", argN))
 		args = append(args, status)
 		argN++
+	default:
+		conditions = append(conditions, "status IN ('inbox', 'saved', 'archived')")
 	}
 	if tag != "" {
 		// Filter by tag using JSONB containment: tags @> '["politics"]'::jsonb
@@ -419,4 +400,134 @@ func (s *ArticleStore) ExistsByURL(ctx context.Context, rawURL string) (bool, er
 		return false, fmt.Errorf("article exists by url: %w", err)
 	}
 	return exists, nil
+}
+
+// ArchiveAfter es la edad a partir de la cual lo no tocado del Inbox pasa a Archivo.
+const ArchiveAfter = 7 * 24 * time.Hour
+
+// TrashGrace es lo que se espera antes de eliminar de verdad lo borrado
+// (el «Deshacer» dura 8 s; la hora de margen cubre cierres y reintentos).
+const TrashGrace = time.Hour
+
+// Trash oculta las noticias de golpe: status 'trashed', recuerda el estado
+// anterior para poder deshacer. Devuelve cuántas cambió.
+func (s *ArticleStore) Trash(ctx context.Context, ids []uuid.UUID) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE articles SET prev_status = status, status = 'trashed', trashed_at = now()
+		WHERE id = ANY($1) AND status <> 'trashed'
+	`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("article trash: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// Restore deshace un borrado: devuelve cada noticia a su estado anterior
+// (o a fallback si no se recuerda). Solo toca lo que sigue en 'trashed'.
+func (s *ArticleStore) Restore(ctx context.Context, ids []uuid.UUID, fallback string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if fallback != "saved" && fallback != "archived" {
+		fallback = "inbox"
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE articles
+		SET status = CASE WHEN prev_status IN ('inbox', 'saved', 'archived') THEN prev_status ELSE $2 END,
+		    prev_status = NULL, trashed_at = NULL
+		WHERE id = ANY($1) AND status = 'trashed'
+	`, ids, fallback)
+	if err != nil {
+		return 0, fmt.Errorf("article restore: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// ArchiveOld pasa a 'archived' lo del Inbox con más de 7 días. Lo guardado y
+// lo archivado se conserva para siempre.
+func (s *ArticleStore) ArchiveOld(ctx context.Context) (int, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE articles SET status = 'archived'
+		WHERE status = 'inbox' AND created_at < now() - make_interval(secs => $1)
+	`, ArchiveAfter.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("article archive old: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// PurgeTrashed elimina de verdad (con sus notas, por cascada) lo borrado hace
+// más de olderThan, y deja su URL y su huella de contenido bloqueadas para que
+// la ingesta no lo vuelva a traer. hashURL/hashContent son los de scraper.
+func (s *ArticleStore) PurgeTrashed(ctx context.Context, olderThan time.Duration, hashURL, hashContent func(string) string) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("article purge: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, url, COALESCE(canonical_url, ''), COALESCE(clean_text, '')
+		FROM articles
+		WHERE status = 'trashed'
+		  AND (trashed_at IS NULL OR trashed_at < now() - make_interval(secs => $1))
+	`, olderThan.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("article purge: list: %w", err)
+	}
+	type victim struct {
+		id                   uuid.UUID
+		url, canonical, text string
+	}
+	var victims []victim
+	for rows.Next() {
+		var v victim
+		if err := rows.Scan(&v.id, &v.url, &v.canonical, &v.text); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("article purge: scan: %w", err)
+		}
+		victims = append(victims, v)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("article purge: rows: %w", err)
+	}
+	if len(victims) == 0 {
+		return 0, nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(victims))
+	for _, v := range victims {
+		ids = append(ids, v.id)
+		contentHash := ""
+		if strings.TrimSpace(v.text) != "" {
+			contentHash = hashContent(v.text)
+		}
+		for _, u := range []string{v.url, v.canonical} {
+			if strings.TrimSpace(u) == "" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO fingerprints (id, canonical_url_hash, content_hash, blocked)
+				VALUES ($1, $2, NULLIF($3, ''), true)
+				ON CONFLICT (canonical_url_hash) DO UPDATE
+				SET blocked = true,
+				    content_hash = COALESCE(NULLIF($3, ''), fingerprints.content_hash)
+			`, uuid.New(), hashURL(u), contentHash); err != nil {
+				return 0, fmt.Errorf("article purge: block: %w", err)
+			}
+		}
+	}
+	// Se borra solo lo que sigue borrado (un Deshacer a medias lo salva).
+	tag, err := tx.Exec(ctx, `DELETE FROM articles WHERE id = ANY($1) AND status = 'trashed'`, ids)
+	if err != nil {
+		return 0, fmt.Errorf("article purge: delete: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("article purge: commit: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }

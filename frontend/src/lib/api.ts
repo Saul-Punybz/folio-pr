@@ -44,7 +44,8 @@ export interface ItemsResponse {
 
 export interface SearchResponse {
   results: Article[];
-  total: number;
+  count?: number;
+  total?: number;
 }
 
 export interface Note {
@@ -283,6 +284,12 @@ export const api = {
 
   trashItem: (id: string) =>
     fetchAPI(`/items/${id}/trash`, { method: 'POST' }),
+
+  trashItems: (ids: string[]): Promise<{ count: number }> =>
+    fetchAPI('/items/trash', { method: 'POST', body: JSON.stringify({ ids }) }),
+
+  undoItems: (ids: string[]): Promise<{ count: number }> =>
+    fetchAPI('/items/undo', { method: 'POST', body: JSON.stringify({ ids }) }),
 
   pinItem: (id: string) =>
     fetchAPI(`/items/${id}/pin`, { method: 'POST' }),

@@ -121,6 +121,12 @@ export default function SavedFeed() {
     }
   }, []);
 
+  const handleTrash = useCallback(async (id: string) => {
+    try { await api.trashItem(id); } catch { return; }
+    setArticles((prev) => prev.filter((a) => a.id !== id));
+    setExpandedId(null);
+  }, []);
+
   const expandedArticle = expandedId ? sorted.find((a) => a.id === expandedId) : null;
 
   if (loading) {
@@ -239,6 +245,9 @@ export default function SavedFeed() {
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={() => handlePin(expandedArticle.id)} className={`btn btn-sm ${expandedArticle.pinned ? 'btn-accent' : 'btn-soft'}`} aria-pressed={!!expandedArticle.pinned}>
                     <Icon name="pin" className="w-5 h-5" fill={!!expandedArticle.pinned} />{expandedArticle.pinned ? 'Fijado' : 'Fijar'}
+                  </button>
+                  <button type="button" onClick={() => handleTrash(expandedArticle.id)} className="btn btn-soft btn-sm">
+                    <Icon name="trash" className="w-5 h-5" />Borrar
                   </button>
                   <a href={api.exportArticle(expandedArticle.id)} className="btn btn-soft btn-sm">
                     <Icon name="open" className="w-5 h-5" />Exportar ZIP

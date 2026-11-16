@@ -127,6 +127,8 @@ func newRouter(st *stores, frontendFS fs.FS, hooks routerHooks) http.Handler {
 		r.Post("/api/shutdown", handlers.Shutdown(hooks.shutdown))
 
 		r.Get("/api/items", itemsH.ListItems)
+		r.Post("/api/items/trash", itemsH.TrashMany)
+		r.Post("/api/items/undo", itemsH.UndoMany)
 		r.Post("/api/items/{id}/save", itemsH.SaveItem)
 		r.Post("/api/items/{id}/trash", itemsH.TrashItem)
 		r.Post("/api/items/{id}/pin", itemsH.PinItem)
@@ -134,7 +136,6 @@ func newRouter(st *stores, frontendFS fs.FS, hooks routerHooks) http.Handler {
 		r.Get("/api/items/{id}/notes", notesH.ListNotes)
 		r.Post("/api/items/{id}/notes", notesH.CreateNote)
 		r.Get("/api/items/{id}/export", exportH.ExportArticle)
-		r.Put("/api/items/{id}/retention", itemsH.UpdateRetention)
 		r.Post("/api/collect", itemsH.CollectItem)
 		r.Get("/api/search", searchH.Search)
 		r.Delete("/api/notes/{noteId}", notesH.DeleteNote)

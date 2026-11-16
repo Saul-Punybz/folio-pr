@@ -98,8 +98,9 @@ func (h *ItemsHandler) SaveItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
-// TrashItem handles POST /api/items/{id}/trash.
-// Sets status to trashed and applies the default 3-month retention policy.
+// TrashItem handles POST /api/items/{id}/trash («Borrar»).
+// Oculta la noticia al instante (status 'trashed'); una tarea la elimina de
+// verdad pasada una hora y bloquea su URL. Mientras tanto «Deshacer» la devuelve.
 func (h *ItemsHandler) TrashItem(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -107,34 +108,86 @@ func (h *ItemsHandler) TrashItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the article so we can modify it.
-	article, err := h.Articles.GetByID(r.Context(), id)
+	n, err := h.Articles.Trash(r.Context(), []uuid.UUID{id})
 	if err != nil {
-		slog.Error("trash item: get", "id", id, "err", err)
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "item not found"})
-		return
-	}
-
-	article.Status = "trashed"
-	article.EvidencePolicy = "ret_3m"
-	expiresAt := time.Now().Add(90 * 24 * time.Hour) // 3 months
-	article.EvidenceExpiresAt = &expiresAt
-
-	if err := h.Articles.UpdateStatus(r.Context(), id, "trashed"); err != nil {
-		slog.Error("trash item: update status", "id", id, "err", err)
+		slog.Error("trash item", "id", id, "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not trash item"})
 		return
 	}
-
-	// Update evidence policy and expiry separately.
-	_, dbErr := h.Articles.Pool().Exec(r.Context(), `
-		UPDATE articles SET evidence_policy = $1, evidence_expires_at = $2 WHERE id = $3
-	`, article.EvidencePolicy, article.EvidenceExpiresAt, id)
-	if dbErr != nil {
-		slog.Error("trash item: update evidence", "id", id, "err", dbErr)
+	if n == 0 {
+		// Ya estaba borrada, o no existe.
+		if _, gerr := h.Articles.GetByID(r.Context(), id); gerr != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "item not found"})
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "trashed"})
+}
+
+const maxBulkIDs = 500
+
+type bulkIDsRequest struct {
+	IDs            []string `json:"ids"`
+	PreviousStatus string   `json:"previous_status,omitempty"`
+}
+
+// parseBulkIDs lee {"ids":[...]}: de 1 a 500 UUID válidos, sin repetidos.
+func parseBulkIDs(w http.ResponseWriter, r *http.Request) ([]uuid.UUID, string, bool) {
+	var req bulkIDsRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return nil, "", false
+	}
+	if len(req.IDs) == 0 || len(req.IDs) > maxBulkIDs {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ids must have between 1 and 500 items"})
+		return nil, "", false
+	}
+	seen := make(map[uuid.UUID]bool, len(req.IDs))
+	ids := make([]uuid.UUID, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid article id"})
+			return nil, "", false
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids, req.PreviousStatus, true
+}
+
+// TrashMany handles POST /api/items/trash with {"ids":[...]} (máx. 500).
+func (h *ItemsHandler) TrashMany(w http.ResponseWriter, r *http.Request) {
+	ids, _, ok := parseBulkIDs(w, r)
+	if !ok {
+		return
+	}
+	n, err := h.Articles.Trash(r.Context(), ids)
+	if err != nil {
+		slog.Error("trash many", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not trash items"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "trashed", "count": n})
+}
+
+// UndoMany handles POST /api/items/undo with {"ids":[...]}: devuelve lo
+// borrado a su estado anterior mientras la purga no lo haya eliminado.
+func (h *ItemsHandler) UndoMany(w http.ResponseWriter, r *http.Request) {
+	ids, prev, ok := parseBulkIDs(w, r)
+	if !ok {
+		return
+	}
+	n, err := h.Articles.Restore(r.Context(), ids, prev)
+	if err != nil {
+		slog.Error("undo many", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not undo items"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "restored", "count": n})
 }
 
 // PinItem handles POST /api/items/{id}/pin.
@@ -164,7 +217,8 @@ func (h *ItemsHandler) PinItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // UndoItem handles POST /api/items/{id}/undo.
-// Restores an article to its previous status (inbox).
+// Deshace un «Borrar» (vuelve al estado anterior) o, si la noticia no estaba
+// borrada, la pone en previous_status (inbox, saved o archived).
 func (h *ItemsHandler) UndoItem(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -175,54 +229,31 @@ func (h *ItemsHandler) UndoItem(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		PreviousStatus string `json:"previous_status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PreviousStatus == "" {
 		body.PreviousStatus = "inbox"
 	}
-	if body.PreviousStatus == "" {
-		body.PreviousStatus = "inbox"
+	switch body.PreviousStatus {
+	case "inbox", "saved", "archived":
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid previous_status"})
+		return
 	}
 
-	if err := h.Articles.UpdateStatus(r.Context(), id, body.PreviousStatus); err != nil {
+	n, err := h.Articles.Restore(r.Context(), []uuid.UUID{id}, body.PreviousStatus)
+	if err != nil {
 		slog.Error("undo item", "id", id, "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not undo item"})
 		return
 	}
+	if n == 0 {
+		// No estaba borrada (p. ej. deshacer un «Guardar»): se pone en el estado pedido.
+		if err := h.Articles.UpdateStatus(r.Context(), id, body.PreviousStatus); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "item not found"})
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": body.PreviousStatus})
-}
-
-type updateRetentionRequest struct {
-	Policy string `json:"policy"`
-}
-
-// UpdateRetention handles PUT /api/items/{id}/retention.
-// Body: { "policy": "ret_6m" | "ret_12m" | "keep" }
-func (h *ItemsHandler) UpdateRetention(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid article id"})
-		return
-	}
-
-	var req updateRetentionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-
-	validPolicies := map[string]bool{"ret_6m": true, "ret_12m": true, "keep": true}
-	if !validPolicies[req.Policy] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "policy must be ret_6m, ret_12m, or keep"})
-		return
-	}
-
-	if err := h.Articles.UpdateRetention(r.Context(), id, req.Policy); err != nil {
-		slog.Error("update retention", "id", id, "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not update retention"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "updated", "policy": req.Policy})
 }
 
 type collectRequest struct {
@@ -263,7 +294,7 @@ func (h *ItemsHandler) CollectItem(w http.ResponseWriter, r *http.Request) {
 		Region:         region,
 		Status:         "inbox",
 		Summary:        scraper.RuleSummary(req.Snippet),
-		EvidencePolicy: "ret_3m",
+		EvidencePolicy: "keep",
 	}
 
 	if err := h.Articles.Create(r.Context(), article); err != nil {

@@ -87,3 +87,19 @@ func (s *FingerprintStore) Block(ctx context.Context, urlHash string) error {
 	}
 	return nil
 }
+
+// ContentBlocked dice si hay una huella bloqueada con ese contenido (una
+// noticia borrada a mano que otra URL repite).
+func (s *FingerprintStore) ContentBlocked(ctx context.Context, contentHash string) (bool, error) {
+	if contentHash == "" {
+		return false, nil
+	}
+	var blocked bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM fingerprints WHERE content_hash = $1 AND blocked = true)
+	`, contentHash).Scan(&blocked)
+	if err != nil {
+		return false, fmt.Errorf("fingerprint content blocked: %w", err)
+	}
+	return blocked, nil
+}

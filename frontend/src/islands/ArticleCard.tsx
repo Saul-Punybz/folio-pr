@@ -10,6 +10,10 @@ interface ArticleCardProps {
   onPin?: (id: string) => void;
   onClick?: () => void;
   showActions?: boolean;
+  /** Modo selección: casilla en la tarjeta. */
+  selecting?: boolean;
+  checked?: boolean;
+  onToggle?: (id: string) => void;
 }
 
 export default function ArticleCard({
@@ -20,6 +24,9 @@ export default function ArticleCard({
   onPin,
   onClick,
   showActions = true,
+  selecting = false,
+  checked = false,
+  onToggle,
 }: ArticleCardProps) {
   const description =
     article.summary ||
@@ -29,16 +36,26 @@ export default function ArticleCard({
 
   return (
     <article
-      onClick={onClick}
+      onClick={selecting && onToggle ? () => onToggle(article.id) : onClick}
       className={`group relative flex flex-col h-full overflow-hidden cursor-pointer
         bg-surface-container-low hover:bg-surface-container
         rounded-[28px] hover:rounded-[36px]
         transition-[border-radius,background-color,transform,box-shadow] duration-500 ease-[var(--spring)]
         active:scale-[0.985]
-        ${selected ? 'ring-[3px] ring-primary shadow-lg' : ''}`}
+        ${selected || checked ? 'ring-[3px] ring-primary shadow-lg' : ''}`}
     >
       <div className="px-5 pt-5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs min-w-0 text-on-surface-variant">
+          {selecting && (
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => onToggle?.(article.id)}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`Seleccionar: ${article.title}`}
+              className="shrink-0"
+            />
+          )}
           {article.pinned && (
             <span className="text-tertiary shrink-0" title="Fijado">
               <Icon name="pin" className="w-4 h-4" fill />
@@ -83,7 +100,7 @@ export default function ArticleCard({
         </div>
       )}
 
-      {showActions && (
+      {showActions && !selecting && (
         <div className="flex items-center gap-2 p-3 pt-4">
           {onSave && (
             <button
@@ -102,7 +119,7 @@ export default function ArticleCard({
               className="btn btn-soft btn-sm"
             >
               <Icon name="trash" className="w-5 h-5" />
-              Descartar
+              Borrar
             </button>
           )}
           {onPin && (

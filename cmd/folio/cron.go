@@ -108,6 +108,11 @@ type extraJob struct {
 // la puesta al día del arranque y el botón «Buscar ahora» (TriggerCrawl).
 type jobs struct {
 	ingestion, watchScan, crawl, recrawl, extraction, grants, oppStatuses, sessionCleanup *task
+	// docCleanup: retención de los PDF guardados (diaria y al arrancar).
+	docCleanup *task
+	// noticias: lo del Inbox con más de 7 días pasa a Archivo y lo borrado
+	// hace más de 1 h se elimina (diaria y al arrancar).
+	noticias *task
 	// fondos: la cadena crawl → extracción → estados (cada 2 h).
 	fondos *task
 	// fondosFull: la cadena completa con Grants.gov (manual y arranque).
@@ -163,6 +168,16 @@ func newJobs(st *stores) *jobs {
 			return
 		}
 		slog.Info("cron: opportunity statuses refreshed", "updated", n)
+	}}
+	j.docCleanup = &task{name: "document-cleanup", timeout: 30 * time.Minute, fn: func(jobCtx context.Context) {
+		// Comparte el candado de la extracción: no se borra un PDF mientras
+		// la extracción lo está leyendo (ni al revés).
+		j.extraction.mu.Lock()
+		defer j.extraction.mu.Unlock()
+		crawler.RunDocumentCleanup(jobCtx, st.crawlDeps, st.settings)
+	}}
+	j.noticias = &task{name: "noticias-mantenimiento", timeout: 10 * time.Minute, fn: func(jobCtx context.Context) {
+		runNoticiasMaintenance(jobCtx, st.articles)
 	}}
 	j.sessionCleanup = &task{name: "session-cleanup", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
 		scraper.RunSessionCleanup(jobCtx, st.sessions)
@@ -235,6 +250,8 @@ func startCron(ctx context.Context, t *jobTracker, j *jobs, opts cronOptions) (*
 		{"30 5 * * *", j.grants},
 		{"0 6 * * *", j.oppStatuses},
 		{"0 4 * * *", j.sessionCleanup},
+		{"30 3 * * *", j.docCleanup},
+		{"45 3 * * *", j.noticias},
 	}
 	var startup []*task
 	for _, e := range opts.extra {
@@ -260,9 +277,9 @@ func startCron(ctx context.Context, t *jobTracker, j *jobs, opts cronOptions) (*
 	if opts.catchUp {
 		// Lo que tocaba mientras estuvo cerrada, una vez y en este orden:
 		// noticias, recrawl, crawl → extracción → Grants.gov → estados, vigilancias.
-		startup = append(startup, j.ingestion, j.recrawl, j.crawl, j.extraction, j.grants, j.oppStatuses, j.watchScan)
+		startup = append(startup, j.noticias, j.ingestion, j.recrawl, j.crawl, j.extraction, j.docCleanup, j.grants, j.oppStatuses, j.watchScan)
 	} else {
-		startup = append(startup, j.ingestion)
+		startup = append(startup, j.noticias, j.ingestion)
 	}
 	if t.start() {
 		go func() {

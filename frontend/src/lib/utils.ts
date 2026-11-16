@@ -67,21 +67,11 @@ export function statusColor(status: string): { bg: string; text: string } {
       return { bg: 'bg-primary/10 ', text: 'text-primary ' };
     case 'saved':
       return { bg: 'bg-success/10 ', text: 'text-success ' };
-    case 'trashed':
-      return { bg: 'bg-error/10 ', text: 'text-error ' };
     case 'archived':
       return { bg: 'bg-surface-container-highest/10 ', text: 'text-on-surface-variant ' };
     default:
       return { bg: 'bg-surface-container-highest/10 ', text: 'text-on-surface-variant ' };
   }
-}
-
-/**
- * Checks if an evidence expiry date has passed.
- */
-export function isExpired(expiresAt: string): boolean {
-  if (!expiresAt) return false;
-  return new Date(expiresAt).getTime() < Date.now();
 }
 
 /**
