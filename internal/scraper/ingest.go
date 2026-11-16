@@ -35,6 +35,8 @@ type DiscoveredArticle struct {
 	Published   time.Time
 	ImageURL    string
 	Categories  []string
+	SourceName  string // medio real (fuentes de búsqueda)
+	SourceURL   string
 }
 
 // Stores groups the data stores needed by the ingestion pipeline.
@@ -83,6 +85,17 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 
 	var ingested atomic.Int32
 
+	// Dominios de los medios de PR que ya se siguen directamente: lo que
+	// traigan Google/Bing de ellos ya entra por su propio feed.
+	var prDomains []string
+	for _, s := range sources {
+		if s.Region == "PR" && !isSearchAggregator(s.FeedURL) {
+			if h := hostOf(s.BaseURL); h != "" {
+				prDomains = append(prDomains, h)
+			}
+		}
+	}
+
 	for _, src := range sources {
 		if ctx.Err() != nil {
 			break
@@ -124,6 +137,28 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 			}
 
 			rawURL := da.URL
+			region := src.Region
+			sourceName := src.Name
+
+			// Fuentes de búsqueda (Google/Bing News): la región sale del medio
+			// real. Los medios de PR se saltan: ya entran por sus feeds y estas
+			// fuentes son para lo que dicen los de fuera.
+			if isSearchAggregator(src.FeedURL) {
+				rawURL = ResolveBingNewsURL(rawURL)
+				host := hostOf(da.SourceURL)
+				if host == "" {
+					host = hostOf(rawURL)
+				}
+				region = RegionForDomain(host, prDomains)
+				if region == "PR" {
+					continue
+				}
+				if da.SourceName != "" {
+					sourceName = da.SourceName
+					// Google añade « - Medio» al final del título.
+					da.Title = strings.TrimSuffix(da.Title, " - "+da.SourceName)
+				}
+			}
 
 			// Canonicalize and check fingerprint.
 			canonical := CanonicalizeURL(rawURL)
@@ -209,7 +244,7 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 			}
 
 			// PR-relevance filter: US/Federal/Global articles must relate to Puerto Rico.
-			if src.Region != "PR" && src.Region != "Grants" {
+			if region != "PR" && region != "Grants" {
 				textForCheck := title + " " + cleanText
 				if !isPRRelevant(textForCheck) {
 					slog.Debug("ingestion: US article not PR-related (keywords), skipping", "title", truncate(title, 60))
@@ -246,11 +281,11 @@ func RunIngestion(ctx context.Context, stores Stores, scraper *Scraper) int {
 			article := &models.Article{
 				ID:             uuid.New(),
 				Title:          title,
-				Source:         src.Name,
+				Source:         sourceName,
 				SourceID:       &srcID,
 				URL:            rawURL,
 				CanonicalURL:   canonical,
-				Region:         src.Region,
+				Region:         region,
 				PublishedAt:    timePtr(publishedAt),
 				CleanText:      cleanText,
 				Summary:        RuleSummary(da.Description, MetaDescription(rawHTML), FirstParagraph(cleanText)),
@@ -309,6 +344,8 @@ func discoverArticles(ctx context.Context, src models.Source, scraper *Scraper) 
 				Published:   item.Published,
 				ImageURL:    item.ImageURL,
 				Categories:  item.Categories,
+				SourceName:  item.SourceName,
+				SourceURL:   item.SourceURL,
 			}
 			results = append(results, da)
 		}
