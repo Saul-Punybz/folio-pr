@@ -127,3 +127,18 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
   - Fondos: «Guardar» (antes Confirmar), Guardados con filtro Grants/Subastas/RFP, el PDF se conserva con el fondo, «Guardar PDF» suelto, «Descargar PDF», lista de PDF guardados.
   - App reemplazada en la Mac de Saul el 16 nov: respaldo previo `Folio2/respaldos/antes-de-actualizar-2026-11-16.sql.gz` (70 MB), migraciones 028-030 aplicadas, páginas 200 y ruta inexistente 404.
   - Pendiente: misión y marcas de la organización (para Grants.gov y vigilancias); probar en la MacBook de la usuaria y Gatekeeper; nada de esto se ha visto en pantalla salvo lo que Saul mire.
+
+## Para el futuro
+
+### Palabras de tendencias (pedido de Saul, 16 nov 2026; no construir hasta que lo pida)
+- Fuente verificada el 16 nov 2026: `https://trends.google.com/trending/rss?geo=PR` (y `geo=US`) responde 200, gratis y sin llave; 10 tendencias diarias con volumen aproximado (`ht:approx_traffic`, p. ej. 500+ a 2000+) y noticias enlazadas. Ese día: «electricidad», «Caguas», «terremoto», «Adamari López», «Objetivo Fama».
+- Idea: panel «Lo que se busca hoy en PR» con las tendencias del día, resaltando las que tocan los temas de la organización (educación, juventud, comunidad, vivienda, energía, emprendimiento), historial semanal, y botón «Escribir sobre esto» hacia Escritos (SEO/GEO).
+- No disponible gratis: las consultas más buscadas por tema (sección «Explorar» de Google Trends). La API oficial de Trends sería solo por invitación (no verificado); las librerías no oficiales se rompen. Las tendencias diarias son de interés general y rara vez del sector sin fines de lucro.
+- Va junto a Escritos, no antes.
+
+### Conectar Meta (Facebook e Instagram) (decisión de Saul, 16 nov 2026: para el futuro)
+- Borrador incompleto en `docs/CONECTAR_META.md`.
+- Botón «Conectar con Meta» (OAuth) en Ajustes; leer publicaciones, comentarios, menciones y etiquetas de las cuentas propias. Requiere que la organización cree una app en Meta for Developers y que los Instagram sean de empresa vinculados a su página.
+- Búsqueda de hashtags de Instagram: requiere Instagram Public Content Access, App Review y verificación de negocio (documentación de Meta, 16 nov 2026); tope 30 hashtags por 7 días.
+- Por confirmar: si Meta acepta el redirect a `http://localhost:47615` en modo Desarrollo.
+- LinkedIn, X y TikTok: sin acceso viable (socio aprobado, pago o aprobación); quedan como enlaces directos.
