@@ -279,7 +279,15 @@ func (h *WatchlistHandler) DeleteOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Orgs.Delete(r.Context(), id, user.ID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "org not found"})
+		switch {
+		case errors.Is(err, models.ErrOrgHasHits):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Esta marca tiene menciones archivadas y no se borra de golpe. Pausa la marca, o borra sus menciones una por una."})
+		case errors.Is(err, models.ErrOrgNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "org not found"})
+		default:
+			slog.Error("delete watchlist org", "id", id, "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -372,10 +380,11 @@ func (h *WatchlistHandler) ListHits(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	if hits == nil {
-		hits = []models.WatchlistHit{}
+	items := make([]archivoItem, 0, len(hits))
+	for _, hit := range hits {
+		items = append(items, buildItem(hit))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"hits": hits, "count": len(hits)})
+	writeJSON(w, http.StatusOK, map[string]any{"hits": items, "count": len(items)})
 }
 
 // CountUnseen handles GET /api/watchlist/hits/unseen.
@@ -438,7 +447,12 @@ func (h *WatchlistHandler) DeleteHit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Hits.Delete(r.Context(), id, user.ID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "hit not found"})
+		if errors.Is(err, models.ErrHitNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "hit not found"})
+		} else {
+			slog.Error("delete watchlist hit", "id", id, "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -447,7 +461,7 @@ func (h *WatchlistHandler) DeleteHit(w http.ResponseWriter, r *http.Request) {
 // TriggerScan handles POST /api/watchlist/scan.
 // Launches the watchlist scan in the background and returns immediately.
 func (h *WatchlistHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
-	go watch.RunWatchlistScan(context.Background(), watch.Deps{
+	go watch.RunWatchlistScan(contextBackground(), watch.Deps{
 		Orgs:     h.Orgs,
 		Hits:     h.Hits,
 		Articles: h.Articles,
@@ -457,3 +471,5 @@ func (h *WatchlistHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 		"message": "Buscando menciones.",
 	})
 }
+
+func contextBackground() context.Context { return context.Background() }

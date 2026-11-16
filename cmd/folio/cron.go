@@ -113,6 +113,9 @@ type jobs struct {
 	// noticias: lo del Inbox con más de 7 días pasa a Archivo y lo borrado
 	// hace más de 1 h se elimina (diaria y al arrancar).
 	noticias *task
+	// archivo: copia de respaldo, cita y enlace en Internet Archive de las
+	// menciones de marca (tandas de 150; al arrancar rellena las que ya había).
+	archivo *task
 	// fondos: la cadena crawl → extracción → estados (cada 2 h).
 	fondos *task
 	// fondosFull: la cadena completa con Grants.gov (manual y arranque).
@@ -178,6 +181,9 @@ func newJobs(st *stores) *jobs {
 	}}
 	j.noticias = &task{name: "noticias-mantenimiento", timeout: 10 * time.Minute, fn: func(jobCtx context.Context) {
 		runNoticiasMaintenance(jobCtx, st.articles)
+	}}
+	j.archivo = &task{name: "archivo-menciones", timeout: 2 * time.Hour, fn: func(jobCtx context.Context) {
+		watch.RunArchive(jobCtx, st.watchHits, watch.ArchiveRunCap)
 	}}
 	j.sessionCleanup = &task{name: "session-cleanup", timeout: 5 * time.Minute, fn: func(jobCtx context.Context) {
 		scraper.RunSessionCleanup(jobCtx, st.sessions)
@@ -252,6 +258,7 @@ func startCron(ctx context.Context, t *jobTracker, j *jobs, opts cronOptions) (*
 		{"0 4 * * *", j.sessionCleanup},
 		{"30 3 * * *", j.docCleanup},
 		{"45 3 * * *", j.noticias},
+		{"30 2,8,14,20 * * *", j.archivo},
 	}
 	var startup []*task
 	for _, e := range opts.extra {
@@ -277,9 +284,9 @@ func startCron(ctx context.Context, t *jobTracker, j *jobs, opts cronOptions) (*
 	if opts.catchUp {
 		// Lo que tocaba mientras estuvo cerrada, una vez y en este orden:
 		// noticias, recrawl, crawl → extracción → Grants.gov → estados, vigilancias.
-		startup = append(startup, j.noticias, j.ingestion, j.recrawl, j.crawl, j.extraction, j.docCleanup, j.grants, j.oppStatuses, j.watchScan)
+		startup = append(startup, j.noticias, j.ingestion, j.recrawl, j.crawl, j.extraction, j.docCleanup, j.grants, j.oppStatuses, j.watchScan, j.archivo)
 	} else {
-		startup = append(startup, j.noticias, j.ingestion)
+		startup = append(startup, j.noticias, j.ingestion, j.archivo)
 	}
 	if t.start() {
 		go func() {

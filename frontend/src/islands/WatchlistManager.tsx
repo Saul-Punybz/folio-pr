@@ -1,21 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api, type WatchlistOrg, type WatchlistHit, type WatchKind, type WatchSocial, type WatchlistOrgInput, type WatchPerson } from '../lib/api';
 import { Icon, Spinner, EmptyState, Modal, Notice } from './ui';
+import { MencionCard, SOURCE_LABELS } from './MencionCard';
+import ArchivoMarca from './ArchivoMarca';
 
 // ── Fuentes y redes ──────────────────────────────────────────────
 
-const SOURCE_LABELS: Record<string, string> = {
-  local: 'Noticias PR',
-  google_news: 'Google News',
-  bing_news: 'Bing News',
-  web: 'Web',
-  sitio: 'Sitio',
-  alertas: 'Alertas',
-  youtube: 'YouTube',
-  bluesky: 'Bluesky',
-  mastodon: 'Mastodon',
-  reddit: 'Reddit',
-};
 const SOURCE_ORDER = Object.keys(SOURCE_LABELS);
 
 const NETWORKS: { key: string; label: string; short: string }[] = [
@@ -39,22 +29,6 @@ const HASHTAG_LINKS: { label: string; url: (t: string) => string }[] = [
 ];
 
 const cleanTag = (t: string) => t.trim().replace(/^#+/, '');
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'ahora';
-  if (mins < 60) return `hace ${mins} min`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `hace ${hrs} h`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `hace ${days} d`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `hace ${months} m`;
-  return new Date(dateStr).toLocaleDateString('es-PR', { year: 'numeric', month: 'short' });
-}
-
-const hitDate = (h: WatchlistHit) => h.published_at || h.created_at;
 
 /** Handle a partir del enlace: https://www.instagram.com/vimentipr/ → vimentipr */
 function handleFromURL(url: string): string {
@@ -264,6 +238,7 @@ export default function WatchlistManager() {
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
 
+  const [archivoOpen, setArchivoOpen] = useState(false);
   const [showRSS, setShowRSS] = useState(false);
   const [feedURL, setFeedURL] = useState('');
   const [feedCopied, setFeedCopied] = useState(false);
@@ -309,6 +284,7 @@ export default function WatchlistManager() {
   useEffect(() => {
     setSourceFilter('all');
     setTagFilter('');
+    setArchivoOpen(false);
     if (selected) fetchHits(selected);
     else setHits([]);
   }, [selected, fetchHits]);
@@ -346,7 +322,7 @@ export default function WatchlistManager() {
   };
 
   const remove = async (o: WatchlistOrg) => {
-    if (!confirm(`¿Borrar «${o.name}» y sus menciones?`)) return;
+    if (!confirm(o.kind === 'marca' ? `¿Borrar «${o.name}»? Una marca con menciones archivadas no se borra: se pausa.` : `¿Borrar «${o.name}» y sus menciones?`)) return;
     try {
       await api.deleteWatchlistOrg(o.id);
       const list = await fetchOrgs();
@@ -482,6 +458,9 @@ export default function WatchlistManager() {
               {current.kind !== 'marca' && <span className="tag">{current.kind === 'persona' ? 'Persona' : 'Tema'}</span>}
             </div>
             <div className="flex items-center gap-1">
+              {current.kind === 'marca' && (
+                <button type="button" onClick={() => setArchivoOpen(o => !o)} aria-pressed={archivoOpen} className="btn btn-tonal btn-sm"><Icon name="inbox" className="w-5 h-5" />Archivo de {current.name}</button>
+              )}
               <button type="button" onClick={() => openEdit(current)} className="icon-btn" title="Editar" aria-label="Editar"><Icon name="note" className="w-5 h-5" /></button>
               <button type="button" onClick={() => toggle(current)} className="btn btn-text btn-sm">{current.active ? 'Pausar' : 'Activar'}</button>
               <button type="button" onClick={() => remove(current)} className="icon-btn hover:text-error" title="Borrar" aria-label="Borrar"><Icon name="trash" className="w-5 h-5" /></button>
@@ -535,6 +514,10 @@ export default function WatchlistManager() {
             </div>
           )}
 
+          {archivoOpen && current.kind === 'marca' ? (
+            <ArchivoMarca orgId={current.id} name={current.name} onBack={() => setArchivoOpen(false)} />
+          ) : (
+            <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="chip-row chip-scroll" role="group" aria-label="Fuente">
               <button type="button" className="chip" aria-pressed={sourceFilter === 'all'} onClick={() => setSourceFilter('all')}>Todas · {hits.length}</button>
@@ -568,11 +551,13 @@ export default function WatchlistManager() {
                 <div key={g.source} className="space-y-3">
                   <h3 className="title-md">{SOURCE_LABELS[g.source]} <span className="text-on-surface-variant">· {g.items.length}</span></h3>
                   <div className="stagger grid grid-cols-1 xl:grid-cols-2 gap-3 items-start">
-                    {g.items.map(h => <HitCard key={h.id} hit={h} onSeen={() => markSeen(h.id)} onDelete={() => removeHit(h.id)} />)}
+                    {g.items.map(h => <MencionCard key={h.id} hit={h} onSeen={() => markSeen(h.id)} onDelete={() => removeHit(h.id)} onChanged={u => setHits(prev => prev.map(x => (x.id === u.id ? u : x)))} />)}
                   </div>
                 </div>
               ))}
             </div>
+          )}
+            </>
           )}
         </section>
       )}
@@ -647,37 +632,5 @@ export default function WatchlistManager() {
         </Modal>
       )}
     </div>
-  );
-}
-
-// ── Mención ──────────────────────────────────────────────────────
-
-function HitCard({ hit, onSeen, onDelete }: { hit: WatchlistHit; onSeen: () => void; onDelete: () => void }) {
-  let host = '';
-  try { host = new URL(hit.url).hostname.replace(/^www\./, ''); } catch { /* sin host */ }
-  return (
-    <article className={`flex flex-col overflow-hidden rounded-[28px] hover:rounded-[36px] transition-[border-radius,background-color] duration-500 ease-[var(--spring)] ${hit.seen ? 'bg-surface-container-low' : 'bg-surface-container ring-[3px] ring-tertiary'}`}>
-      <div className="px-5 pt-5 flex items-center justify-between gap-2 text-xs font-semibold text-on-surface-variant">
-        <span className="truncate">{host}</span>
-        <span className="shrink-0">{timeAgo(hitDate(hit))}</span>
-      </div>
-      <h4 className="px-5 pt-2 text-lg font-extrabold leading-tight tracking-tight line-clamp-3">
-        <a href={hit.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">{hit.title || 'Sin título'}</a>
-      </h4>
-      {hit.snippet && hit.snippet !== hit.title && <p className="px-5 pt-2 text-sm text-on-surface-variant leading-relaxed line-clamp-3">{hit.snippet}</p>}
-      {(hit.matched_hashtag || hit.matched_person) && (
-        <div className="px-5 pt-2 flex flex-wrap gap-1.5">
-          {hit.matched_person && <span className="tag tag-accent">{hit.matched_person}</span>}
-          {hit.matched_hashtag && <span className="tag tag-primary">#{hit.matched_hashtag}</span>}
-        </div>
-      )}
-      <div className="flex items-center gap-2 p-3 pt-4">
-        {!hit.seen && (
-          <button type="button" onClick={onSeen} className="btn btn-filled btn-sm"><Icon name="check" className="w-5 h-5" />Marcar visto</button>
-        )}
-        <button type="button" onClick={onDelete} className="btn btn-soft btn-sm"><Icon name="trash" className="w-5 h-5" />Quitar</button>
-        <a href={hit.url} target="_blank" rel="noopener noreferrer" className="icon-btn ml-auto" title="Abrir original" aria-label="Abrir original"><Icon name="open" /></a>
-      </div>
-    </article>
   );
 }

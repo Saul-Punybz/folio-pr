@@ -136,6 +136,59 @@ export interface WatchlistHit {
   seen: boolean;
   published_at: string | null;
   created_at: string;
+  // Archivo permanente
+  original_url: string;
+  medio: string;
+  fecha: string;
+  canonical_url: string;
+  resolved_url: string;
+  site_name: string;
+  authors: string[];
+  lang: string;
+  image_url: string;
+  summary: string;
+  archive_status: 'pendiente' | 'copia' | 'parcial' | 'sin_copia';
+  archive_attempts: number;
+  archived_at: string | null;
+  wayback_url: string;
+  edited: boolean;
+  has_text: boolean;
+  apa: { plain: string; markdown: string };
+}
+
+export interface ArchivoStats {
+  total: number;
+  copia: number;
+  parcial: number;
+  sin_copia: number;
+  pendiente: number;
+  con_autor: number;
+  con_fecha: number;
+  con_wayback: number;
+}
+
+export interface ArchivoFilters {
+  q?: string;
+  desde?: string;
+  hasta?: string;
+  fuente?: string;
+}
+
+export interface ArchivoResponse {
+  org: { id: string; name: string };
+  total: number;
+  stats: ArchivoStats;
+  hits: WatchlistHit[];
+  bibliografia: { plain: string; markdown: string };
+}
+
+export interface HitMetaInput {
+  title: string;
+  site_name: string;
+  authors: string[];
+  published_at: string;
+  summary: string;
+  canonical_url: string;
 }
 
 export interface WatchlistHitsResponse {
@@ -446,6 +499,31 @@ export const api = {
 
   markOrgHitsSeen: (id: string) =>
     fetchAPI(`/watchlist/orgs/${id}/seen-all`, { method: 'POST' }),
+
+  getArchivo: (orgId: string, f: ArchivoFilters = {}): Promise<ArchivoResponse> => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(f)) if (v) qs.set(k, v);
+    return fetchAPI(`/watchlist/orgs/${orgId}/archivo?${qs}`);
+  },
+
+  /** Enlace de descarga (Markdown o CSV) con los mismos filtros de la pantalla. */
+  archivoExportURL: (orgId: string, formato: 'md' | 'csv', f: ArchivoFilters = {}): string => {
+    const qs = new URLSearchParams({ formato });
+    for (const [k, v] of Object.entries(f)) if (v) qs.set(k, v);
+    return `${API_BASE}/watchlist/orgs/${orgId}/archivo/exportar?${qs}`;
+  },
+
+  getHitCopia: (id: string): Promise<{ hit: WatchlistHit; text: string }> =>
+    fetchAPI(`/watchlist/hits/${id}/copia`),
+
+  updateHitMeta: (id: string, data: HitMetaInput): Promise<WatchlistHit> =>
+    fetchAPI(`/watchlist/hits/${id}/meta`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  retryHitCopia: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/watchlist/hits/${id}/reintentar`, { method: 'POST' }),
+
+  runArchivo: (): Promise<{ status: string }> =>
+    fetchAPI('/watchlist/archivo/run', { method: 'POST' }),
 
   triggerWatchlistScan: (): Promise<{ status: string; message: string }> =>
     fetchAPI('/watchlist/scan', { method: 'POST' }),

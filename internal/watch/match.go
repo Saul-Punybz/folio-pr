@@ -161,6 +161,14 @@ func (m Matcher) Match(text string, org models.WatchlistOrg) (string, bool) {
 		if !containsWord(f, ft) {
 			continue
 		}
+		// «Impact PR» también es el nombre de agencias de relaciones públicas:
+		// solo cuenta con contexto propio de la organización.
+		if ft == "impact pr" {
+			if impactPRContext(f) {
+				return t, true
+			}
+			continue
+		}
 		weak := weakTerm(t) || isContextAlias(t, org)
 		multi := strings.ContainsAny(strings.TrimSpace(t), " ")
 		if org.IsBrand() && (weak || (m.NeedPR && multi)) && !hasContext(ft) {
@@ -169,6 +177,21 @@ func (m Matcher) Match(text string, org models.WatchlistOrg) (string, bool) {
 		return t, true
 	}
 	return "", false
+}
+
+// impactPRContext: «Impact PR» solo cuenta junto a «Platform for Social
+// Impact», «PSI», «Oasis», «impactpr.co», o «Puerto Rico» con «impacto social»
+// / «social impact». Texto ya doblado (fold).
+func impactPRContext(f string) bool {
+	for _, c := range []string{"platform for social impact", "psi", "oasis"} {
+		if containsWord(f, c) {
+			return true
+		}
+	}
+	if strings.Contains(f, "impactpr.co") {
+		return true
+	}
+	return strings.Contains(f, "puerto rico") && (strings.Contains(f, "impacto social") || strings.Contains(f, "social impact"))
 }
 
 // MatchesOrg dice si el texto menciona el org (alias o nombre + palabras

@@ -103,7 +103,7 @@ func ScanMastodon(ctx context.Context, org models.WatchlistOrg, m Matcher, deps 
 				if mt.Tag == "" && mt.Person == "" {
 					mt.Tag = h
 				}
-				if saveHit(ctx, deps, org, "mastodon", mt, postTitle(p), p.URL, p.Text, p.Published) {
+				if saveHitWith(ctx, deps, org, "mastodon", mt, postTitle(p), p.URL, p.Text, p.Published, withPost(p)) {
 					saved++
 				}
 			}

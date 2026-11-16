@@ -95,7 +95,35 @@ type WatchlistHit struct {
 	Seen        bool       `json:"seen"`
 	PublishedAt *time.Time `json:"published_at"`
 	CreatedAt   time.Time  `json:"created_at"`
+
+	// Archivo permanente: copia del contenido y metadatos de la cita.
+	CanonicalURL    string     `json:"canonical_url"`
+	ResolvedURL     string     `json:"resolved_url"`
+	SiteName        string     `json:"site_name"`
+	Authors         []string   `json:"authors"`
+	Lang            string     `json:"lang"`
+	ImageURL        string     `json:"image_url"`
+	Summary         string     `json:"summary"`
+	ArchiveStatus   string     `json:"archive_status"` // pendiente, copia, parcial, sin_copia
+	ArchiveAttempts int        `json:"archive_attempts"`
+	ArchivedAt      *time.Time `json:"archived_at"`
+	WaybackURL      string     `json:"wayback_url"`
+	Edited          bool       `json:"edited"`
+	HasText         bool       `json:"has_text"`
+	// ContentText solo se llena al crear (posts) y al leer una copia.
+	ContentText string `json:"-"`
 }
+
+// Estados de la copia de respaldo.
+const (
+	ArchivePendiente = "pendiente"
+	ArchiveCopia     = "copia"
+	ArchiveParcial   = "parcial" // la página cargó, pero el cuerpo no venía en el HTML
+	ArchiveSinCopia  = "sin_copia"
+
+	// MaxArchiveAttempts: intentos de bajar una página antes de rendirse.
+	MaxArchiveAttempts = 3
+)
 
 // NetworkFor da la red de una fuente: las de noticias se agrupan juntas.
 func NetworkFor(sourceType string) string {
@@ -364,16 +392,41 @@ func (s *WatchlistOrgStore) Update(ctx context.Context, org *WatchlistOrg) error
 	return tx.Commit(ctx)
 }
 
-// Delete borra la fila si es de userID.
+// ErrOrgHasHits: una marca con menciones archivadas no se borra de golpe.
+var ErrOrgHasHits = errors.New("la marca tiene menciones archivadas")
+
+// Delete borra la fila si es de userID. Una marca con menciones archivadas
+// no se borra (se pausa): sus menciones solo se borran a mano, una por una.
+// Los temas y personas se borran con sus menciones.
 func (s *WatchlistOrgStore) Delete(ctx context.Context, id, userID uuid.UUID) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM watchlist_orgs WHERE id = $1 AND user_id = $2`, id, userID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("watchlist org delete: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrOrgNotFound
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op tras Commit
+	var kind string
+	if err := tx.QueryRow(ctx, `SELECT kind FROM watchlist_orgs WHERE id = $1 AND user_id = $2 FOR UPDATE`, id, userID).Scan(&kind); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrOrgNotFound
+		}
+		return fmt.Errorf("watchlist org delete: %w", err)
 	}
-	return nil
+	if kind == KindMarca {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM watchlist_hits WHERE org_id = $1`, id).Scan(&n); err != nil {
+			return fmt.Errorf("watchlist org delete: %w", err)
+		}
+		if n > 0 {
+			return ErrOrgHasHits
+		}
+	}
+	if err := permitirBorrado(ctx, tx); err != nil {
+		return fmt.Errorf("watchlist org delete: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM watchlist_orgs WHERE id = $1 AND user_id = $2`, id, userID); err != nil {
+		return fmt.Errorf("watchlist org delete: %w", err)
+	}
+	return tx.Commit(ctx)
 }
 
 // ToggleActive pausa o activa la fila si es de userID (con el tope de marcas).
@@ -567,20 +620,29 @@ func (s *WatchlistHitStore) Create(ctx context.Context, hit *WatchlistHit) error
 	if hit.Sentiment == "" {
 		hit.Sentiment = "unknown"
 	}
-	// Deduplicado: por url_hash (en todas las marcas) y, dentro de la marca,
-	// por título normalizado (la misma noticia con otra URL).
+	if hit.ArchiveStatus == "" {
+		hit.ArchiveStatus = ArchivePendiente
+	}
+	authors, _ := json.Marshal(nonNilStrings(hit.Authors))
+	// Deduplicado POR MARCA: misma URL en la misma marca, o mismo título
+	// normalizado en la misma marca (la misma noticia con otra URL). Una
+	// noticia que nombra dos marcas queda en las dos.
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO watchlist_hits (id, org_id, source_type, network, matched_hashtag, title, url, url_hash,
-			snippet, sentiment, published_at, title_key, matched_person)
+			snippet, sentiment, published_at, title_key, matched_person,
+			authors, content_text, site_name, summary, lang, archive_status, archived_at)
 		SELECT $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::text, $8::text,
-			$9::text, $10::text, $11::timestamptz, $12::text, $13::text
+			$9::text, $10::text, $11::timestamptz, $12::text, $13::text,
+			$14::jsonb, $15::text, $16::text, $17::text, $18::text, $19::text,
+			CASE WHEN $19::text IN ('copia', 'parcial') THEN now() END
 		WHERE $12::text = '' OR NOT EXISTS (
 			SELECT 1 FROM watchlist_hits WHERE org_id = $2::uuid AND title_key = $12::text
 		)
-		ON CONFLICT (url_hash) DO NOTHING
+		ON CONFLICT (org_id, url_hash) DO NOTHING
 		RETURNING created_at
 	`, hit.ID, hit.OrgID, hit.SourceType, hit.Network, hit.Hashtag, hit.Title, hit.URL, hit.URLHash,
-		hit.Snippet, hit.Sentiment, hit.PublishedAt, hit.TitleKey, hit.Person).Scan(&hit.CreatedAt)
+		hit.Snippet, hit.Sentiment, hit.PublishedAt, hit.TitleKey, hit.Person,
+		authors, hit.ContentText, hit.SiteName, hit.Summary, hit.Lang, hit.ArchiveStatus).Scan(&hit.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		hit.ID = uuid.Nil // duplicado
 		return nil
@@ -590,6 +652,13 @@ func (s *WatchlistHitStore) Create(ctx context.Context, hit *WatchlistHit) error
 		return fmt.Errorf("watchlist hit create: %w", err)
 	}
 	return nil
+}
+
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 // MarkSeen marca una mención de esa usuaria como vista.
@@ -633,9 +702,28 @@ func (s *WatchlistHitStore) MarkAllSeenByOrg(ctx context.Context, orgID, userID 
 	return int(tag.RowsAffected()), nil
 }
 
-// Delete borra una mención de esa usuaria.
+// ErrHitNotFound: la mención no existe o no es de esa usuaria.
+var ErrHitNotFound = errors.New("watchlist hit not found")
+
+// permitirBorrado habilita, solo en esta transacción, el borrado de menciones
+// (el candado de la migración 032 lo exige).
+func permitirBorrado(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `SELECT set_config('folio.borrar_mencion', 'on', true)`)
+	return err
+}
+
+// Delete borra UNA mención de esa usuaria. Es la única vía para borrar
+// menciones: ninguna limpieza automática lo hace.
 func (s *WatchlistHitStore) Delete(ctx context.Context, hitID, userID uuid.UUID) error {
-	tag, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("watchlist hit delete: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op tras Commit
+	if err := permitirBorrado(ctx, tx); err != nil {
+		return fmt.Errorf("watchlist hit delete: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
 		DELETE FROM watchlist_hits wh USING watchlist_orgs wo
 		WHERE wh.id = $1 AND wh.org_id = wo.id AND wo.user_id = $2
 	`, hitID, userID)
@@ -643,9 +731,9 @@ func (s *WatchlistHitStore) Delete(ctx context.Context, hitID, userID uuid.UUID)
 		return fmt.Errorf("watchlist hit delete: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("watchlist hit not found: %s", hitID)
+		return ErrHitNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (s *WatchlistHitStore) ListRecentByUser(ctx context.Context, userID uuid.UUID, limit int) ([]WatchlistHit, error) {
@@ -668,7 +756,9 @@ func (s *WatchlistHitStore) ListRecentByUser(ctx context.Context, userID uuid.UU
 }
 
 const hitColumns = `wh.id, wh.org_id, wo.name, wh.source_type, wh.network, wh.matched_hashtag, wh.matched_person, wh.title, wh.url, wh.url_hash,
-		       wh.snippet, wh.sentiment, wh.ai_draft, wh.seen, wh.published_at, wh.created_at`
+		       wh.snippet, wh.sentiment, wh.ai_draft, wh.seen, wh.published_at, wh.created_at,
+		       wh.canonical_url, wh.resolved_url, wh.site_name, wh.authors, wh.lang, wh.image_url, wh.summary,
+		       wh.archive_status, wh.archive_attempts, wh.archived_at, wh.wayback_url, wh.edited, (wh.content_text <> '')`
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -679,16 +769,31 @@ func scanHitRows(rows interface {
 }) ([]WatchlistHit, error) {
 	var hits []WatchlistHit
 	for rows.Next() {
-		var h WatchlistHit
-		if err := rows.Scan(
-			&h.ID, &h.OrgID, &h.OrgName, &h.SourceType, &h.Network, &h.Hashtag, &h.Person, &h.Title, &h.URL, &h.URLHash,
-			&h.Snippet, &h.Sentiment, &h.AIDraft, &h.Seen, &h.PublishedAt, &h.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("watchlist hit scan: %w", err)
+		h, err := scanHit(rows)
+		if err != nil {
+			return nil, err
 		}
 		hits = append(hits, h)
 	}
 	return hits, rows.Err()
+}
+
+func scanHit(row rowScanner) (WatchlistHit, error) {
+	var h WatchlistHit
+	var authors []byte
+	if err := row.Scan(
+		&h.ID, &h.OrgID, &h.OrgName, &h.SourceType, &h.Network, &h.Hashtag, &h.Person, &h.Title, &h.URL, &h.URLHash,
+		&h.Snippet, &h.Sentiment, &h.AIDraft, &h.Seen, &h.PublishedAt, &h.CreatedAt,
+		&h.CanonicalURL, &h.ResolvedURL, &h.SiteName, &authors, &h.Lang, &h.ImageURL, &h.Summary,
+		&h.ArchiveStatus, &h.ArchiveAttempts, &h.ArchivedAt, &h.WaybackURL, &h.Edited, &h.HasText,
+	); err != nil {
+		return h, fmt.Errorf("watchlist hit scan: %w", err)
+	}
+	h.Authors = scanJSONStringSlice(authors)
+	if h.Authors == nil {
+		h.Authors = []string{}
+	}
+	return h, nil
 }
 
 // scanJSONStringSlice unmarshals a JSONB column into a []string.

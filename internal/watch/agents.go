@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Saul-Punybz/folio/internal/archivo"
 	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/scraper"
 )
@@ -65,6 +66,9 @@ func RunWatchlistScan(ctx context.Context, deps Deps) {
 		"new_hits", totalHits,
 		"duration", time.Since(start).Round(time.Millisecond),
 	)
+
+	// Lo nuevo se archiva enseguida: copia del contenido, cita y respaldo.
+	RunArchive(ctx, deps.Hits, ArchiveRunCap)
 }
 
 // brandContext: nombres y alias de todas las marcas activas (dan contexto a
@@ -193,6 +197,25 @@ func youtubeChannels(org models.WatchlistOrg) []string {
 // saveHit guarda una mención (deduplicada por URL y, en noticias y web, por
 // título). true si es nueva.
 func saveHit(ctx context.Context, deps Deps, org models.WatchlistOrg, source string, mt match, title, link, snippet string, published time.Time) bool {
+	return saveHitWith(ctx, deps, org, source, mt, title, link, snippet, published)
+}
+
+// withPost guarda además el texto y el autor de un post de red social: ya
+// vienen de la API, así que la mención nace archivada.
+func withPost(p socialPost) func(*models.WatchlistHit) {
+	return func(h *models.WatchlistHit) {
+		h.ArchiveStatus = models.ArchiveCopia
+		h.ContentText = strings.TrimSpace(p.Text)
+		h.Summary = truncateStr(strings.Join(strings.Fields(p.Text), " "), 600)
+		h.SiteName = archivo.PlatformFor(h.SourceType)
+		if a := strings.TrimSpace(p.Author); a != "" {
+			h.Authors = []string{a}
+		}
+	}
+}
+
+// saveHitWith es saveHit con ajustes opcionales a la mención antes de guardarla.
+func saveHitWith(ctx context.Context, deps Deps, org models.WatchlistOrg, source string, mt match, title, link, snippet string, published time.Time, opts ...func(*models.WatchlistHit)) bool {
 	link = unwrapRedirect(link)
 	title = strings.TrimSpace(title)
 	hit := &models.WatchlistHit{
@@ -210,6 +233,16 @@ func saveHit(ctx context.Context, deps Deps, org models.WatchlistOrg, source str
 	switch source {
 	case "google_news", "bing_news", "local", "web", "alertas":
 		hit.TitleKey = titleKey(title)
+	}
+	if source == "google_news" {
+		// Google News agrega « - Medio» al título: el título queda limpio y el medio aparte.
+		if t, site := archivo.SplitTitleSite(title); site != "" {
+			hit.Title = truncateStr(t, 300)
+			hit.SiteName = site
+		}
+	}
+	for _, o := range opts {
+		o(hit)
 	}
 	if !published.IsZero() {
 		p := published.UTC()

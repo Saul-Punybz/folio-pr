@@ -209,7 +209,7 @@ func ScanBluesky(ctx context.Context, org models.WatchlistOrg, m Matcher, deps D
 			if !ok {
 				continue
 			}
-			if saveHit(ctx, deps, org, "bluesky", mt, postTitle(p), p.URL, p.Text, p.Published) {
+			if saveHitWith(ctx, deps, org, "bluesky", mt, postTitle(p), p.URL, p.Text, p.Published, withPost(p)) {
 				saved++
 			}
 		}

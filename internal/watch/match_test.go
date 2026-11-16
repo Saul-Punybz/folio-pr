@@ -81,6 +81,35 @@ func TestMatchAliasesYExclusiones(t *testing.T) {
 	}
 }
 
+// Error de la corrida real: un post de una agencia de relaciones públicas
+// llamada «Impact PR» entró en PSI.
+func TestImpactPRAgenciaNoEsPSI(t *testing.T) {
+	psi := brand("Platform for Social Impact (PSI)")
+	for _, m := range []Matcher{{Context: brandContext(allBrands())}, {Context: brandContext(allBrands()), NeedPR: true}} {
+		for _, text := range []string{
+			"Impact PR launches a new campaign for local brands in Puerto Rico",
+			"Impact PR celebra su aniversario en San Juan con clientes y aliados",
+			"Gracias a Impact PR por la cobertura del lanzamiento en Puerto Rico",
+			"Impact PR is hiring a content creator",
+		} {
+			if _, ok := m.Match(text, psi); ok {
+				t.Errorf("la agencia no debe entrar en PSI: %q", text)
+			}
+		}
+		for _, text := range []string{
+			"Impact PR y Platform for Social Impact firman acuerdo",
+			"Impact PR, el sistema de Oasis, abre convocatoria",
+			"Impact PR impulsa el impacto social en Puerto Rico",
+			"Impact PR works on social impact in Puerto Rico",
+			"PSI e Impact PR anuncian programa",
+		} {
+			if _, ok := m.Match(text, psi); !ok {
+				t.Errorf("debía entrar en PSI: %q", text)
+			}
+		}
+	}
+}
+
 func TestNeedPRParaRedesGlobales(t *testing.T) {
 	m := Matcher{Context: brandContext(allBrands()), NeedPR: true}
 	pm := brand("Project Makers")
