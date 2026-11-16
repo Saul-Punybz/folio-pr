@@ -166,6 +166,16 @@
   .btn-soft { background: rgb(var(--c-surface-container-high)); color: rgb(var(--c-on-surface)); }
   .btn-soft[aria-pressed='true'], .btn-soft.on { background: rgb(var(--c-primary-container)); color: rgb(var(--c-on-primary-container)); border-radius: 14px; }
 
+  /* Acciones de la tarjeta de noticia: «Guardar» ocupa lo que sobra y nunca se
+     encoge por debajo de su etiqueta; el resto son íconos en una píldora tonal. */
+  .card-actions {
+    display: flex; align-items: center; gap: 8px; padding: 16px 12px 12px;
+  }
+  .card-actions .card-save { flex: 1 1 auto; min-width: 7.5rem; border-radius: 16px; }
+  .card-actions .card-save:active { border-radius: 9999px; }
+  .card-actions .icon-btn { flex: 0 0 auto; background: rgb(var(--c-surface-container-high)); }
+  .card-actions .icon-btn.ml-auto { margin-left: 0; }
+
   /* Botón de ícono */
   .icon-btn {
     position: relative; display: inline-flex; align-items: center; justify-content: center;

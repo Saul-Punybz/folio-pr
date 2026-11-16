@@ -101,25 +101,26 @@ export default function ArticleCard({
       )}
 
       {showActions && !selecting && (
-        <div className="flex items-center gap-2 p-3 pt-4">
+        <div className="card-actions">
           {onSave && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onSave(article.id); }}
-              className="btn btn-filled btn-sm flex-1"
+              className="btn btn-filled btn-sm card-save"
             >
-              <Icon name="save" className="w-5 h-5" />
-              Guardar
+              <Icon name="save" className="w-5 h-5 shrink-0" />
+              <span>Guardar</span>
             </button>
           )}
           {onTrash && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onTrash(article.id); }}
-              className="btn btn-soft btn-sm"
+              className="icon-btn"
+              title="Borrar"
+              aria-label="Borrar"
             >
-              <Icon name="trash" className="w-5 h-5" />
-              Borrar
+              <Icon name="trash" className="w-6 h-6" />
             </button>
           )}
           {onPin && (
