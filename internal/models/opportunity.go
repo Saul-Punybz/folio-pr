@@ -58,6 +58,9 @@ type Opportunity struct {
 	SourceKind    string            `json:"source_kind"`
 	DocumentURL   string            `json:"document_url"`
 	DocScanned    bool              `json:"document_scanned"`
+	DocLocal      bool              `json:"document_local"` // el PDF está en disco
+	DocKept       bool              `json:"document_kept"`  // el PDF está guardado (la retención no lo borra)
+	FundType      string            `json:"fund_type"`      // grant | subasta | rfp | otros (ver FundType)
 	Evidence      map[string]string `json:"evidence"`
 	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
@@ -112,7 +115,8 @@ const oppColumns = `o.id, o.page_id, o.domain_id, o.title, o.agency, o.summary, 
 	o.deadline, o.contact_name, o.contact_email, o.contact_phone, o.category, o.status, o.source_url,
 	o.confidence, o.raw_extraction, o.reviewed, o.reference, o.level, o.source_kind,
 	o.document_id, o.document_remote_url, o.document_scanned, o.evidence, o.dedupe_key,
-	o.edited_fields, o.created_at, o.updated_at`
+	o.edited_fields, o.created_at, o.updated_at,
+	COALESCE((SELECT d.kept FROM documents d WHERE d.id = o.document_id), false)`
 
 func scanOpportunity(row pgx.Row) (*Opportunity, error) {
 	var o Opportunity
@@ -122,7 +126,7 @@ func scanOpportunity(row pgx.Row) (*Opportunity, error) {
 		&o.Deadline, &o.ContactName, &o.ContactEmail, &o.ContactPhone, &o.Category, &o.Status, &o.SourceURL,
 		&o.Confidence, &o.RawExtraction, &o.Reviewed, &o.Reference, &o.Level, &o.SourceKind,
 		&o.DocumentID, &o.DocumentRemoteURL, &o.DocScanned, &ev, &o.DedupeKey,
-		&o.EditedFields, &o.CreatedAt, &o.UpdatedAt,
+		&o.EditedFields, &o.CreatedAt, &o.UpdatedAt, &o.DocKept,
 	); err != nil {
 		return nil, err
 	}
@@ -130,6 +134,8 @@ func scanOpportunity(row pgx.Row) (*Opportunity, error) {
 	if len(ev) > 0 {
 		_ = json.Unmarshal(ev, &o.Evidence)
 	}
+	o.FundType = FundType(o.Category, o.Reference, o.Title)
+	o.DocLocal = o.DocumentID != nil
 	switch {
 	case o.DocumentID != nil:
 		o.DocumentURL = "/api/opportunities/" + o.ID.String() + "/document"
@@ -498,6 +504,31 @@ func (s *OpportunityStore) Dismiss(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("opportunity dismiss: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// Unreview saca un fondo de Guardados: vuelve a Por revisar. Su PDF no se
+// toca (si estaba guardado, sigue en «PDF guardados» hasta que ella lo suelte).
+func (s *OpportunityStore) Unreview(ctx context.Context, id uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE opportunities SET reviewed = false, updated_at = NOW() WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("opportunity unreview: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// SetDocument enlaza un fondo con un documento recién bajado.
+func (s *OpportunityStore) SetDocument(ctx context.Context, id, docID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE opportunities SET document_id = $2, updated_at = NOW() WHERE id = $1`, id, docID)
+	if err != nil {
+		return fmt.Errorf("opportunity set document: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (s *OpportunityStore) MarkReviewed(ctx context.Context, id uuid.UUID) error {

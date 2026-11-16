@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { api, type Opportunity, type OpportunityLevel, type CrawlDomain, type CrawlRun, type OpportunityStatsResponse } from '../lib/api';
+import { api, type Opportunity, type OpportunityLevel, type FundType, type KeptDocument, type KeptDocumentsResponse, type CrawlDomain, type CrawlRun, type OpportunityStatsResponse } from '../lib/api';
 import { Icon, Spinner, EmptyState, Modal, Notice } from './ui';
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -68,6 +68,19 @@ const LEVELS: { value: OpportunityLevel; label: string }[] = [
 ];
 const LEVEL_LABELS: Record<string, string> = Object.fromEntries(LEVELS.map(l => [l.value, l.label]));
 
+const FUND_TYPES: { value: FundType; label: string }[] = [
+  { value: 'grant', label: 'Grants' },
+  { value: 'subasta', label: 'Subastas' },
+  { value: 'rfp', label: 'RFP' },
+  { value: 'otros', label: 'Otros' },
+];
+
+function formatSize(n: number): string {
+  if (n >= 1073741824) return `${(n / 1073741824).toFixed(1)} GB`;
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
 const DOMAIN_CATEGORY_OPTIONS = [
   { value: 'government', label: 'Gobierno' },
   { value: 'legislature', label: 'Legislatura' },
@@ -81,7 +94,7 @@ const DOMAIN_CATEGORY_OPTIONS = [
 const UNDO_MS = 6000;
 
 type Tab = 'fondos' | 'paginas';
-type View = 'pending' | 'confirmed';
+type View = 'pending' | 'saved' | 'pdfs';
 
 // Process phases for the single-button flow
 type ProcessPhase = 'idle' | 'crawling' | 'done';
@@ -208,6 +221,8 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View | null>(null);
   const [levelFilter, setLevelFilter] = useState<OpportunityLevel | ''>('');
+  const [typeFilter, setTypeFilter] = useState<FundType | ''>('');
+  const [info, setInfo] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -220,23 +235,24 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
   useEffect(() => {
     if (view !== null) return;
     api.getOpportunityStats()
-      .then(s => { setStats(s); setView((s.pending || 0) > 0 ? 'pending' : 'confirmed'); })
-      .catch(() => setView('confirmed'));
+      .then(s => { setStats(s); setView((s.pending || 0) > 0 ? 'pending' : 'saved'); })
+      .catch(() => setView('saved'));
   }, [view]);
 
   const loadData = useCallback(async () => {
     if (view === null) return;
+    if (view === 'pdfs') { setLoading(false); return; }
     setLoading(true);
     try {
       const [oppRes, statsRes] = await Promise.all([
         searchQuery
           ? api.searchOpportunities(searchQuery, 100)
           : api.getOpportunities({
-              reviewed: view === 'confirmed',
+              reviewed: view === 'saved',
               level: levelFilter || undefined,
               category: categoryFilter || undefined,
-              sort: view === 'confirmed' ? 'deadline' : 'created_at',
-              limit: 100,
+              sort: view === 'saved' ? 'deadline' : 'created_at',
+              limit: view === 'saved' ? 500 : 100,
             }),
         api.getOpportunityStats(),
       ]);
@@ -280,15 +296,31 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
     setSearchQuery(searchInput.trim());
   };
 
-  const handleConfirm = async (opp: Opportunity) => {
+  const handleSave = async (opp: Opportunity) => {
     setError('');
+    setInfo('');
     setOpps(o => o.filter(x => x.id !== opp.id));
     adjustPending(-1);
     try {
-      await api.reviewOpportunity(opp.id);
+      const res = await api.reviewOpportunity(opp.id);
+      if (res.pdf === 'remote') setInfo('Se guardó el fondo, pero no se pudo bajar el PDF. Queda el enlace al sitio.');
     } catch (err) {
       console.error('Review error', err);
-      setError('No se pudo confirmar. Inténtalo otra vez.');
+      setError('No se pudo guardar. Inténtalo otra vez.');
+      loadData();
+    }
+  };
+
+  const handleUnsave = async (opp: Opportunity) => {
+    setError('');
+    setInfo('');
+    setOpps(o => o.filter(x => x.id !== opp.id));
+    adjustPending(1);
+    try {
+      await api.unreviewOpportunity(opp.id);
+    } catch (err) {
+      console.error('Unreview error', err);
+      setError('No se pudo quitar de guardados. Inténtalo otra vez.');
       loadData();
     }
   };
@@ -333,13 +365,15 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
     );
   }
 
-  const wantReviewed = view === 'confirmed';
+  const wantReviewed = view === 'saved';
   const visible = opps.filter(o =>
     !hidden.has(o.id) &&
     (!!o.reviewed) === wantReviewed &&
     (!levelFilter || o.level === undefined || o.level === levelFilter) &&
-    (!categoryFilter || o.category === categoryFilter),
+    (!categoryFilter || o.category === categoryFilter) &&
+    (!wantReviewed || !typeFilter || o.fund_type === typeFilter),
   );
+  const typeChips = FUND_TYPES.filter(t => t.value !== 'otros' || opps.some(o => o.fund_type === 'otros'));
 
   const closing = wantReviewed
     ? visible
@@ -348,7 +382,7 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
         .sort((a, b) => a.n - b.n)
     : [];
 
-  const resetFilters = () => { setLevelFilter(''); setCategoryFilter(''); setSearchQuery(''); setSearchInput(''); };
+  const resetFilters = () => { setLevelFilter(''); setTypeFilter(''); setCategoryFilter(''); setSearchQuery(''); setSearchInput(''); };
 
   return (
     <div className="space-y-5">
@@ -356,12 +390,29 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
         <button type="button" className="chip" aria-pressed={view === 'pending'} onClick={() => setView('pending')}>
           Por revisar ({pendingCount})
         </button>
-        <button type="button" className="chip" aria-pressed={view === 'confirmed'} onClick={() => setView('confirmed')}>
-          Confirmados
+        <button type="button" className="chip" aria-pressed={view === 'saved'} onClick={() => setView('saved')}>
+          Guardados
+        </button>
+        <button type="button" className="chip" aria-pressed={view === 'pdfs'} onClick={() => setView('pdfs')}>
+          PDF guardados
         </button>
       </div>
 
-      <div className="space-y-3">
+      {view === 'pdfs' && <KeptDocsView />}
+
+      {view !== 'pdfs' && wantReviewed && (
+        <div className="chip-row chip-scroll" role="group" aria-label="Tipo">
+          <button type="button" className="chip" aria-pressed={typeFilter === ''} onClick={() => setTypeFilter('')}>Todos</button>
+          {typeChips.map(t => (
+            <button key={t.value} type="button" className="chip" aria-pressed={typeFilter === t.value}
+              onClick={() => setTypeFilter(typeFilter === t.value ? '' : t.value)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {view !== 'pdfs' && <div className="space-y-3">
         <div className="chip-row chip-scroll" role="group" aria-label="Nivel">
           {LEVELS.map(l => (
             <button key={l.value} type="button" className="chip" aria-pressed={levelFilter === l.value}
@@ -384,11 +435,12 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
             <button type="submit" className="icon-btn bg-primary-container text-on-primary-container shrink-0" aria-label="Buscar"><Icon name="search" /></button>
           </form>
         </div>
-      </div>
+      </div>}
 
       {error && <Notice>{error}</Notice>}
+      {info && <Notice kind="accent">{info}</Notice>}
 
-      {closing.length > 0 && (
+      {view !== 'pdfs' && closing.length > 0 && (
         <section className="space-y-3" aria-label="Cierran pronto">
           <h2 className="title-lg">Cierran pronto</h2>
           <div className="chip-row chip-scroll !flex-nowrap overflow-x-auto">
@@ -403,17 +455,17 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
         </section>
       )}
 
-      {loading || view === null ? (
+      {view === 'pdfs' ? null : loading || view === null ? (
         <div className="space-y-2">
           {[0, 1, 2].map(i => <div key={i} className="h-28 rounded-[28px] bg-surface-container-low animate-pulse" />)}
         </div>
       ) : visible.length === 0 ? (
-        levelFilter || categoryFilter || searchQuery ? (
+        levelFilter || typeFilter || categoryFilter || searchQuery ? (
           <EmptyState icon="search" text="Nada con esos filtros.">
             <button type="button" onClick={resetFilters} className="btn btn-tonal">Quitar filtros</button>
           </EmptyState>
         ) : wantReviewed ? (
-          <EmptyState icon="inbox" text="Aún no has confirmado fondos." />
+          <EmptyState icon="inbox" text="Aún no has guardado fondos." />
         ) : (
           <EmptyState icon="search" text="No hay fondos por revisar.">
             {!isBusy && <button type="button" onClick={onScan} className="btn btn-filled">Buscar ahora</button>}
@@ -422,7 +474,7 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
       ) : (
         <div className="stagger grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
           {visible.map(opp => (
-            <OpportunityCard key={opp.id} opp={opp} onConfirm={handleConfirm} onDiscard={handleDiscard} onSaved={loadData} />
+            <OpportunityCard key={opp.id} opp={opp} onSave={handleSave} onUnsave={handleUnsave} onDiscard={handleDiscard} onSaved={loadData} />
           ))}
         </div>
       )}
@@ -444,6 +496,76 @@ function OpportunityTab({ domains, refreshCallbackRef, isBusy, onScan }: {
 }
 
 
+/** PDF guardados: lista, espacio que ocupan y cuánto pesa Folio en total. */
+function KeptDocsView() {
+  const [data, setData] = useState<KeptDocumentsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setData(await api.getKeptDocuments());
+    } catch {
+      setError('No se pudo cargar la lista. Inténtalo otra vez.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const release = async (d: KeptDocument) => {
+    setError('');
+    try {
+      await api.unkeepDocument(d.id);
+      setData(x => x ? { ...x, documents: x.documents.filter(y => y.id !== d.id), kept_bytes: Math.max(0, x.kept_bytes - d.size_bytes) } : x);
+    } catch {
+      setError('No se pudo dejar de guardar el PDF.');
+    }
+  };
+
+  if (loading) return <div className="h-28 rounded-[28px] bg-surface-container-low animate-pulse" />;
+  const docs = data?.documents || [];
+  return (
+    <div className="space-y-4">
+      {error && <Notice>{error}</Notice>}
+      {data && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <DataBlock label="PDF guardados" value={`${docs.length} · ${formatSize(data.kept_bytes)}`} empty="" />
+          <DataBlock label="Folio en total" value={formatSize(data.total_bytes)} empty="" />
+        </div>
+      )}
+      {docs.length === 0 ? (
+        <EmptyState icon="inbox" text="Aún no has guardado PDF." />
+      ) : (
+        <div className="stagger grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+          {docs.map(d => (
+            <div key={d.id} className="bg-surface-container-low rounded-[28px] p-5 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {d.saved && <span className="tag tag-ok !text-sm !px-3">Fondo guardado</span>}
+                <span className="tag !text-sm !px-3 bg-surface-container-highest text-on-surface">{formatSize(d.size_bytes)}</span>
+              </div>
+              <h3 className="text-xl font-extrabold leading-tight tracking-tight break-words">{d.title || d.reference || 'Sin título'}</h3>
+              {d.agency && <p className="text-sm font-bold text-primary">{d.agency}</p>}
+              <p className="text-sm font-semibold text-on-surface-variant">{formatDate(d.created_at)}</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => openExternal(d.file_url)} className="btn btn-tonal btn-sm">
+                  <Icon name="open" className="w-5 h-5" />Abrir
+                </button>
+                <button type="button" onClick={() => openExternal(`${d.file_url}?download=1`)} className="btn btn-soft btn-sm">
+                  <Icon name="save" className="w-5 h-5" />Descargar
+                </button>
+                <button type="button" onClick={() => release(d)} className="btn btn-text btn-sm">
+                  <Icon name="pin" className="w-5 h-5" />Dejar de guardar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Un dato grande de la tarjeta; vacío = texto tenue, nunca inventado. */
 function DataBlock({ label, value, empty, quote, tone }: { label: string; value?: string; empty: string; quote?: string; tone?: 'accent' }) {
   const has = !!(value && value.trim());
@@ -456,9 +578,10 @@ function DataBlock({ label, value, empty, quote, tone }: { label: string; value?
   );
 }
 
-function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
+function OpportunityCard({ opp, onSave, onUnsave, onDiscard, onSaved }: {
   opp: Opportunity;
-  onConfirm: (o: Opportunity) => void;
+  onSave: (o: Opportunity) => void;
+  onUnsave: (o: Opportunity) => void;
   onDiscard: (o: Opportunity) => void;
   onSaved: () => void;
 }) {
@@ -471,6 +594,31 @@ function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
   const ev = opp.evidence || {};
   const scanned = !!opp.document_scanned;
   const hasDoc = !!opp.document_url;
+  const [docLocal, setDocLocal] = useState(!!opp.document_local);
+  const [docKept, setDocKept] = useState(!!opp.document_kept);
+  const [docBusy, setDocBusy] = useState(false);
+  const [docError, setDocError] = useState('');
+  const localUrl = `/api/opportunities/${opp.id}/document`;
+  const docHref = docLocal ? localUrl : opp.document_url!;
+
+  const toggleKeep = async () => {
+    setDocBusy(true);
+    setDocError('');
+    try {
+      if (docKept) {
+        await api.unkeepOpportunityDocument(opp.id);
+        setDocKept(false);
+      } else {
+        await api.keepOpportunityDocument(opp.id);
+        setDocKept(true);
+        setDocLocal(true);
+      }
+    } catch {
+      setDocError(docKept ? 'No se pudo dejar de guardar el PDF.' : 'No se pudo guardar el PDF. Ábrelo en el sitio.');
+    } finally {
+      setDocBusy(false);
+    }
+  };
 
   const loadPageContent = async () => {
     if (pageContent || !opp.page_id) return;
@@ -506,7 +654,8 @@ function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
           <span className="tag tag-primary !text-sm !px-3">{CATEGORY_LABELS[opp.category] || opp.category}</span>
           {opp.level && <span className="tag !text-sm !px-3 bg-surface-container-highest text-on-surface">{LEVEL_LABELS[opp.level] || opp.level}</span>}
           {opp.source_kind === 'pdf' && <span className="tag !text-sm !px-3 bg-surface-container-highest text-on-surface">PDF</span>}
-          {opp.reviewed && <span className="tag tag-ok !text-sm !px-3">Confirmado</span>}
+          {opp.reviewed && <span className="tag tag-ok !text-sm !px-3">Guardado</span>}
+          {docKept && <span className="tag tag-ok !text-sm !px-3">PDF guardado</span>}
         </div>
 
         <h3 className="text-xl font-extrabold leading-tight tracking-tight">{opp.title || 'Sin título'}</h3>
@@ -534,9 +683,13 @@ function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
           <Notice kind="accent">PDF escaneado: léelo para completar los datos</Notice>
         )}
         <div className="flex flex-wrap gap-2">
-          {!opp.reviewed && (
-            <button type="button" onClick={() => onConfirm(opp)} className="btn btn-filled flex-1 min-w-[140px]">
-              <Icon name="check" className="w-5 h-5" />Confirmar
+          {!opp.reviewed ? (
+            <button type="button" onClick={() => onSave(opp)} className="btn btn-filled flex-1 min-w-[140px]">
+              <Icon name="save" className="w-5 h-5" />Guardar
+            </button>
+          ) : (
+            <button type="button" onClick={() => onUnsave(opp)} className="btn btn-tonal">
+              <Icon name="undo" className="w-5 h-5" />Quitar de guardados
             </button>
           )}
           <button type="button" onClick={() => onDiscard(opp)} className={`btn btn-danger ${opp.reviewed ? '' : 'flex-1 min-w-[140px]'}`}>
@@ -546,6 +699,22 @@ function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
             <Icon name="note" className="w-5 h-5" />Corregir
           </button>
         </div>
+        {hasDoc && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => openExternal(docHref)} className="btn btn-tonal btn-sm">
+              <Icon name="open" className="w-5 h-5" />{docLocal ? 'Abrir PDF' : 'Abrir en el sitio'}
+            </button>
+            {docLocal && (
+              <button type="button" onClick={() => openExternal(`${localUrl}?download=1`)} className="btn btn-soft btn-sm">
+                <Icon name="save" className="w-5 h-5" />Descargar PDF
+              </button>
+            )}
+            <button type="button" disabled={docBusy} onClick={toggleKeep} className="btn btn-soft btn-sm">
+              <Icon name="pin" className="w-5 h-5" />{docKept ? 'Dejar de guardar PDF' : 'Guardar PDF'}
+            </button>
+          </div>
+        )}
+        {docError && <Notice>{docError}</Notice>}
       </div>
 
       {expanded && (
@@ -570,11 +739,6 @@ function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {hasDoc && (
-              <button type="button" onClick={() => openExternal(opp.document_url!)} className="btn btn-tonal btn-sm">
-                <Icon name="open" className="w-5 h-5" />Abrir PDF
-              </button>
-            )}
             {opp.source_url && (
               <button type="button" onClick={() => openExternal(opp.source_url)} className="btn btn-soft btn-sm">
                 <Icon name="link" className="w-5 h-5" />Ver fuente
@@ -607,20 +771,7 @@ function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
         </div>
       )}
 
-      {/* Los enlaces también están a la mano cuando la tarjeta está cerrada y el PDF no se pudo leer */}
-      {!expanded && scanned && hasDoc && (
-        <div className="px-5 pb-5 -mt-2 flex flex-wrap gap-2">
-          <button type="button" onClick={() => openExternal(opp.document_url!)} className="btn btn-tonal btn-sm">
-            <Icon name="open" className="w-5 h-5" />Abrir PDF
-          </button>
-          {opp.source_url && (
-            <button type="button" onClick={() => openExternal(opp.source_url)} className="btn btn-soft btn-sm">
-              <Icon name="link" className="w-5 h-5" />Ver fuente
-            </button>
-          )}
-        </div>
-      )}
-      {!expanded && !(scanned && hasDoc) && opp.source_url && (
+      {!expanded && opp.source_url && (
         <div className="px-5 pb-5 -mt-2">
           <button type="button" onClick={() => openExternal(opp.source_url)} className="btn btn-soft btn-sm">
             <Icon name="link" className="w-5 h-5" />Ver fuente
@@ -628,12 +779,12 @@ function OpportunityCard({ opp, onConfirm, onDiscard, onSaved }: {
         </div>
       )}
 
-      {editing && <EditModal opp={opp} onClose={() => setEditing(false)} onSaved={(confirmed) => { setEditing(false); if (confirmed) onConfirm(opp); else onSaved(); }} />}
+      {editing && <EditModal opp={opp} onClose={() => setEditing(false)} onSaved={(saved) => { setEditing(false); if (saved) onSave(opp); else onSaved(); }} />}
     </div>
   );
 }
 
-function EditModal({ opp, onClose, onSaved }: { opp: Opportunity; onClose: () => void; onSaved: (confirmed: boolean) => void }) {
+function EditModal({ opp, onClose, onSaved }: { opp: Opportunity; onClose: () => void; onSaved: (saved: boolean) => void }) {
   const d = parseDay(opp.deadline);
   const iso = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : '';
   const [title, setTitle] = useState(opp.title || '');
@@ -646,7 +797,7 @@ function EditModal({ opp, onClose, onSaved }: { opp: Opportunity; onClose: () =>
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const save = async (confirm: boolean) => {
+  const save = async (andSave: boolean) => {
     setSaving(true);
     setError('');
     try {
@@ -659,8 +810,7 @@ function EditModal({ opp, onClose, onSaved }: { opp: Opportunity; onClose: () =>
         contact_phone: contactPhone.trim(),
         contact_email: contactEmail.trim(),
       } as Partial<Opportunity>);
-      if (confirm) await api.reviewOpportunity(opp.id);
-      onSaved(false);
+      onSaved(andSave);
     } catch (e) {
       console.error('Update opp error', e);
       setError('No se pudo guardar. Inténtalo otra vez.');
@@ -710,9 +860,9 @@ function EditModal({ opp, onClose, onSaved }: { opp: Opportunity; onClose: () =>
         </div>
         {error && <Notice>{error}</Notice>}
         <div className="flex flex-wrap gap-2 pt-1">
-          <button type="submit" disabled={saving} className="btn btn-filled">{saving ? 'Guardando...' : 'Guardar'}</button>
+          <button type="submit" disabled={saving} className="btn btn-filled">{saving ? 'Guardando...' : 'Guardar cambios'}</button>
           {!opp.reviewed && (
-            <button type="button" disabled={saving} onClick={() => save(true)} className="btn btn-tonal">Guardar y confirmar</button>
+            <button type="button" disabled={saving} onClick={() => save(true)} className="btn btn-tonal">Guardar cambios y el fondo</button>
           )}
           <button type="button" onClick={onClose} className="btn btn-text">Cancelar</button>
         </div>

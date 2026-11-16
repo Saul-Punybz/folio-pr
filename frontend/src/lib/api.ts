@@ -174,6 +174,26 @@ export interface CrawlerStatsResponse {
 
 // ── Opportunities (Grant/RFP Tracker) ───────────────────────────
 
+export type FundType = 'grant' | 'subasta' | 'rfp' | 'otros';
+
+export interface KeptDocument {
+  id: string;
+  opportunity_id: string | null;
+  title: string;
+  agency: string;
+  reference: string;
+  size_bytes: number;
+  created_at: string;
+  file_url: string;
+  saved: boolean;
+}
+
+export interface KeptDocumentsResponse {
+  documents: KeptDocument[];
+  kept_bytes: number;
+  total_bytes: number;
+}
+
 export interface Opportunity {
   id: string;
   page_id: string | null;
@@ -197,6 +217,9 @@ export interface Opportunity {
   source_kind?: 'pagina' | 'pdf' | 'api';
   document_url?: string;
   document_scanned?: boolean;
+  document_local?: boolean;
+  document_kept?: boolean;
+  fund_type?: FundType;
   contact_phone?: string;
   evidence?: { deadline?: string; amount?: string; reference?: string; title?: string };
   created_at: string;
@@ -476,8 +499,24 @@ export const api = {
   deleteOpportunity: (id: string): Promise<{ status: string }> =>
     fetchAPI(`/opportunities/${id}`, { method: 'DELETE' }),
 
-  reviewOpportunity: (id: string): Promise<{ status: string }> =>
+  // «Guardar» un fondo (el endpoint conserva el nombre review). pdf: kept | remote | none.
+  reviewOpportunity: (id: string): Promise<{ status: string; pdf?: 'kept' | 'remote' | 'none' }> =>
     fetchAPI(`/opportunities/${id}/review`, { method: 'POST' }),
+
+  unreviewOpportunity: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/opportunities/${id}/unreview`, { method: 'POST' }),
+
+  keepOpportunityDocument: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/opportunities/${id}/document/keep`, { method: 'POST' }),
+
+  unkeepOpportunityDocument: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/opportunities/${id}/document/unkeep`, { method: 'POST' }),
+
+  getKeptDocuments: (): Promise<KeptDocumentsResponse> =>
+    fetchAPI('/documents/kept'),
+
+  unkeepDocument: (id: string): Promise<{ status: string }> =>
+    fetchAPI(`/documents/${id}/unkeep`, { method: 'POST' }),
 
   refreshOpportunityStatuses: (): Promise<{ status: string; updated: number }> =>
     fetchAPI('/opportunities/refresh-statuses', { method: 'POST' })

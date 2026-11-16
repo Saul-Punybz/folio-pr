@@ -21,6 +21,7 @@ type Document struct {
 	Scanned   bool
 	SourceURL string
 	CreatedAt time.Time
+	Kept      bool
 }
 
 type DocumentStore struct {
@@ -52,9 +53,9 @@ func (s *DocumentStore) Upsert(ctx context.Context, d *Document) error {
 func (s *DocumentStore) Get(ctx context.Context, id uuid.UUID) (*Document, error) {
 	var d Document
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, sha256, path, size_bytes, pages, scanned, source_url, created_at
+		SELECT id, sha256, path, size_bytes, pages, scanned, source_url, created_at, kept
 		FROM documents WHERE id = $1`, id).
-		Scan(&d.ID, &d.SHA256, &d.Path, &d.SizeBytes, &d.Pages, &d.Scanned, &d.SourceURL, &d.CreatedAt)
+		Scan(&d.ID, &d.SHA256, &d.Path, &d.SizeBytes, &d.Pages, &d.Scanned, &d.SourceURL, &d.CreatedAt, &d.Kept)
 	if err != nil {
 		return nil, fmt.Errorf("document get: %w", err)
 	}
@@ -114,6 +115,10 @@ type DocState struct {
 	HasActive bool
 	// Pending: alguna página/PDF suya aún no pasó por la extracción.
 	Pending bool
+	// Kept: PDF guardado (suelto o con su fondo). Nunca se borra ni cuenta para el tope.
+	Kept bool
+	// Saved: lo usa un fondo guardado (reviewed), aunque ya esté cerrado.
+	Saved bool
 }
 
 // ClosedGraceDays: un fondo cerrado conserva su PDF este tiempo.
@@ -127,7 +132,9 @@ func (s *DocumentStore) ListDocStates(ctx context.Context, now time.Time) ([]Doc
 		          AND NOT (o.status = 'closed' AND o.deadline IS NOT NULL
 		                   AND o.deadline < ($1::timestamptz AT TIME ZONE 'America/Puerto_Rico')::date - $2::int)) AS has_active,
 		  EXISTS (SELECT 1 FROM crawled_pages cp WHERE cp.document_id = d.id
-		          AND cp.opportunity_checked = false) AS pending
+		          AND cp.opportunity_checked = false) AS pending,
+		  d.kept,
+		  EXISTS (SELECT 1 FROM opportunities o WHERE o.document_id = d.id AND o.reviewed) AS saved
 		FROM documents d WHERE d.path <> ''`, now, ClosedGraceDays)
 	if err != nil {
 		return nil, fmt.Errorf("document states: %w", err)
@@ -136,7 +143,7 @@ func (s *DocumentStore) ListDocStates(ctx context.Context, now time.Time) ([]Doc
 	var out []DocState
 	for rows.Next() {
 		var d DocState
-		if err := rows.Scan(&d.ID, &d.Path, &d.SizeBytes, &d.CreatedAt, &d.HasActive, &d.Pending); err != nil {
+		if err := rows.Scan(&d.ID, &d.Path, &d.SizeBytes, &d.CreatedAt, &d.HasActive, &d.Pending, &d.Kept, &d.Saved); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -182,4 +189,87 @@ func (s *DocumentStore) ReferencedPaths(ctx context.Context) (map[string]bool, e
 		out[p] = true
 	}
 	return out, rows.Err()
+}
+
+// SetKept guarda o suelta un PDF. Solo vale si el archivo está en disco.
+func (s *DocumentStore) SetKept(ctx context.Context, id uuid.UUID, kept bool) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE documents SET kept = $2 WHERE id = $1 AND (path <> '' OR NOT $2)`, id, kept)
+	if err != nil {
+		return fmt.Errorf("document set kept: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// KeepForOpportunity guarda el PDF local de un fondo. false si no tiene.
+func (s *DocumentStore) KeepForOpportunity(ctx context.Context, oppID uuid.UUID) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE documents SET kept = true
+		WHERE path <> '' AND id = (SELECT document_id FROM opportunities WHERE id = $1)`, oppID)
+	if err != nil {
+		return false, fmt.Errorf("document keep: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// UnkeepForOpportunity suelta el PDF de un fondo.
+func (s *DocumentStore) UnkeepForOpportunity(ctx context.Context, oppID uuid.UUID) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE documents SET kept = false
+		WHERE id = (SELECT document_id FROM opportunities WHERE id = $1)`, oppID)
+	if err != nil {
+		return false, fmt.Errorf("document unkeep: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// KeptDoc: una fila de «PDF guardados».
+type KeptDoc struct {
+	ID            uuid.UUID  `json:"id"`
+	OpportunityID *uuid.UUID `json:"opportunity_id"`
+	Title         string     `json:"title"`
+	Agency        string     `json:"agency"`
+	Reference     string     `json:"reference"`
+	SizeBytes     int64      `json:"size_bytes"`
+	CreatedAt     time.Time  `json:"created_at"`
+	FileURL       string     `json:"file_url"`
+	Saved         bool       `json:"saved"` // su fondo también está guardado
+}
+
+// ListKept lista los PDF guardados con su archivo en disco, los más nuevos primero.
+func (s *DocumentStore) ListKept(ctx context.Context) ([]KeptDoc, int64, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT d.id, o.id, COALESCE(NULLIF(o.title, ''), NULLIF(cp.title, ''), d.source_url, ''),
+		       COALESCE(o.agency, ''), COALESCE(o.reference, ''), d.size_bytes, d.created_at, COALESCE(o.reviewed, false)
+		FROM documents d
+		LEFT JOIN LATERAL (SELECT * FROM opportunities WHERE document_id = d.id
+		                   ORDER BY reviewed DESC, updated_at DESC LIMIT 1) o ON true
+		LEFT JOIN LATERAL (SELECT title FROM crawled_pages WHERE document_id = d.id LIMIT 1) cp ON true
+		WHERE d.kept AND d.path <> ''
+		ORDER BY d.created_at DESC`)
+	if err != nil {
+		return nil, 0, fmt.Errorf("documents kept: %w", err)
+	}
+	defer rows.Close()
+	out := []KeptDoc{}
+	var total int64
+	for rows.Next() {
+		var k KeptDoc
+		if err := rows.Scan(&k.ID, &k.OpportunityID, &k.Title, &k.Agency, &k.Reference, &k.SizeBytes, &k.CreatedAt, &k.Saved); err != nil {
+			return nil, 0, err
+		}
+		k.FileURL = "/api/documents/" + k.ID.String() + "/file"
+		total += k.SizeBytes
+		out = append(out, k)
+	}
+	return out, total, rows.Err()
+}
+
+// SHAFor devuelve la huella de un documento con archivo en disco.
+func (s *DocumentStore) SHAFor(ctx context.Context, id uuid.UUID) (string, error) {
+	var sha string
+	err := s.pool.QueryRow(ctx, `SELECT sha256 FROM documents WHERE id = $1 AND path <> ''`, id).Scan(&sha)
+	return sha, err
 }

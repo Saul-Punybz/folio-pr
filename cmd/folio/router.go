@@ -85,7 +85,7 @@ func newRouter(st *stores, frontendFS fs.FS, hooks routerHooks) http.Handler {
 	watchH := &handlers.WatchlistHandler{Orgs: st.watchOrgs, Hits: st.watchHits, Articles: st.articles}
 	exportH := &handlers.ExportHandler{Articles: st.articles, Notes: st.notes}
 	feedH := &handlers.FeedHandler{Users: st.users, Hits: st.watchHits}
-	oppH := &handlers.OpportunityHandler{Opportunities: st.opportunities, DataDir: st.dataDir}
+	oppH := &handlers.OpportunityHandler{Opportunities: st.opportunities, Documents: st.crawlDeps.Documents, DataDir: st.dataDir}
 	adminH := &handlers.AdminHandler{
 		Articles: st.articles, Sources: st.sources, Fingerprints: st.fingerprints,
 		Scraper: sc,
@@ -176,6 +176,15 @@ func newRouter(st *stores, frontendFS fs.FS, hooks routerHooks) http.Handler {
 			})
 		})
 
+		r.Route("/api/documents", func(r chi.Router) {
+			r.Get("/kept", oppH.KeptDocuments)
+			r.Get("/{id}/file", oppH.DocumentFile)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAdmin)
+				r.Post("/{id}/unkeep", oppH.UnkeepDocumentByID)
+			})
+		})
+
 		r.Route("/api/opportunities", func(r chi.Router) {
 			r.Get("/", oppH.List)
 			r.Get("/stats", oppH.Stats)
@@ -184,6 +193,9 @@ func newRouter(st *stores, frontendFS fs.FS, hooks routerHooks) http.Handler {
 			r.Get("/{id}/document", oppH.Document)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireAdmin)
+				r.Post("/{id}/unreview", oppH.Unreview)
+				r.Post("/{id}/document/keep", oppH.KeepDocument)
+				r.Post("/{id}/document/unkeep", oppH.UnkeepDocument)
 				r.Put("/{id}", oppH.Update)
 				r.Delete("/{id}", oppH.Delete)
 				r.Post("/{id}/review", oppH.Review)

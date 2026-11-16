@@ -81,3 +81,29 @@ func TestDocumentsMaxBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanRetentionNuncaBorraGuardados(t *testing.T) {
+	now := time.Date(2026, 11, 16, 9, 0, 0, 0, ast)
+	id := func(n string) uuid.UUID { return uuid.NewSHA1(uuid.NameSpaceURL, []byte(n)) }
+	mk := func(name string, kept, saved bool, mb int64) models.DocState {
+		return models.DocState{ID: id(name), Path: "documentos/" + name + ".pdf", SizeBytes: mb << 20,
+			CreatedAt: now.AddDate(0, 0, -300), Kept: kept, Saved: saved}
+	}
+	docs := []models.DocState{
+		mk("kept-suelto", true, false, 50),            // PDF guardado sin fondo vivo
+		mk("fondo-guardado-cerrado", false, true, 50), // fondo guardado, cerrado hace meses
+		mk("suelto", false, false, 50),                // nada lo protege
+	}
+	// Con y sin tope: solo cae el que nada protege, y los guardados no cuentan para el tope.
+	for _, cap := range []int64{1 << 30, 60 << 20, 1} {
+		got := PlanRetention(docs, now, cap)
+		if len(got) != 1 || got[0] != id("suelto") {
+			t.Fatalf("tope %d: borrar = %v, solo debía ser suelto", cap, got)
+		}
+	}
+	// Soltado el PDF (Kept=false) y sin fondo, vuelve a quedar expuesto.
+	docs[0].Kept = false
+	if got := PlanRetention(docs[:1], now, 1<<30); len(got) != 1 {
+		t.Fatalf("un PDF soltado debía quedar expuesto: %v", got)
+	}
+}

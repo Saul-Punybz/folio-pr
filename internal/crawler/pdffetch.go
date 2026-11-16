@@ -2,12 +2,17 @@ package crawler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
+	"github.com/Saul-Punybz/folio/internal/models"
 	"github.com/Saul-Punybz/folio/internal/pdftext"
 )
 
@@ -99,4 +104,57 @@ func FetchPDF(ctx context.Context, rawURL string, maxBytes int64) (*FetchResult,
 		res.Body = body
 	}
 	return res, nil
+}
+
+// DownloadDocument baja un PDF (con los mismos topes del crawler), lo guarda
+// en <datos>/documentos/<sha256>.pdf y registra su fila. Sirve para guardar a
+// pedido un PDF que solo se conocía por su enlace.
+func DownloadDocument(ctx context.Context, docs *models.DocumentStore, dataDir, rawURL string) (*models.Document, error) {
+	return downloadDocument(ctx, docs, dataDir, rawURL, FetchPDF)
+}
+
+// DownloadDocumentWith es DownloadDocument con otra función de descarga (pruebas).
+func DownloadDocumentWith(ctx context.Context, docs *models.DocumentStore, dataDir, rawURL string,
+	fetch func(context.Context, string, int64) (*FetchResult, error)) (*models.Document, error) {
+	return downloadDocument(ctx, docs, dataDir, rawURL, fetch)
+}
+
+func downloadDocument(ctx context.Context, docs *models.DocumentStore, dataDir, rawURL string,
+	fetch func(context.Context, string, int64) (*FetchResult, error)) (*models.Document, error) {
+	if docs == nil || dataDir == "" {
+		return nil, errors.New("sin carpeta de documentos")
+	}
+	res, err := fetch(ctx, rawURL, MaxDocumentBytes)
+	if err != nil {
+		return nil, err
+	}
+	if !res.IsPDF || len(res.Body) == 0 {
+		return nil, errors.New("el enlace no devolvió un PDF")
+	}
+	text, err := pdftext.Extract(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(res.Body)
+	sha := hex.EncodeToString(sum[:])
+	rel := filepath.Join("documentos", sha+".pdf")
+	abs := filepath.Join(dataDir, rel)
+	if _, statErr := os.Stat(abs); statErr != nil {
+		if err := os.MkdirAll(DocumentsDir(dataDir), 0o700); err != nil {
+			return nil, err
+		}
+		tmp := abs + ".tmp"
+		if err := os.WriteFile(tmp, res.Body, 0o600); err != nil {
+			return nil, err
+		}
+		if err := os.Rename(tmp, abs); err != nil {
+			return nil, err
+		}
+	}
+	doc := &models.Document{SHA256: sha, Path: rel, SizeBytes: int64(len(res.Body)), Pages: text.Pages,
+		Scanned: text.Scanned, SourceURL: rawURL}
+	if err := docs.Upsert(ctx, doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
 }

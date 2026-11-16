@@ -47,6 +47,8 @@ const newDocGrace = time.Hour
 //  1. Los que ningún fondo vivo usa: no produjeron fondo, el fondo fue
 //     descartado o quedó cerrado hace más de 90 días. Se salvan los que aún
 //     esperan extracción o se bajaron hace menos de una hora.
+//     Un documento guardado (Kept, o el de un fondo guardado) jamás se borra
+//     ni cuenta para el tope.
 //  2. Si aun así el total pasa del tope, lo más viejo sin fondo vivo, aunque
 //     sea reciente. El PDF de un fondo por revisar o confirmado jamás se toca.
 //
@@ -56,7 +58,7 @@ func PlanRetention(docs []models.DocState, now time.Time, capBytes int64) []uuid
 	var total int64
 	var rest []models.DocState
 	for _, d := range docs {
-		if d.Path == "" {
+		if d.Path == "" || d.Kept || d.Saved {
 			continue
 		}
 		if !d.HasActive && !d.Pending && now.Sub(d.CreatedAt) >= newDocGrace {

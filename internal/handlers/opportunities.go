@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Saul-Punybz/folio/internal/crawler"
 	"github.com/Saul-Punybz/folio/internal/extract"
 	"github.com/Saul-Punybz/folio/internal/models"
 )
@@ -23,8 +27,11 @@ import (
 // OpportunityHandler handles grant/RFP opportunity API endpoints.
 type OpportunityHandler struct {
 	Opportunities *models.OpportunityStore
+	Documents     *models.DocumentStore
 	// DataDir: carpeta de datos (los PDF están en DataDir/documentos).
 	DataDir string
+	// Fetch baja un PDF por su enlace (por defecto, la descarga del crawler).
+	Fetch func(ctx context.Context, url string, maxBytes int64) (*crawler.FetchResult, error)
 }
 
 func boolParam(r *http.Request, name string) *bool {
@@ -236,7 +243,9 @@ func (h *OpportunityHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// Review marks an opportunity as reviewed (confirmado).
+// Review guarda un fondo (en la interfaz, «Guardar»; el nombre es contrato) y
+// conserva su PDF: si solo hay enlace remoto, lo baja ahora. Si la descarga
+// falla el fondo se guarda igual. pdf: "kept" | "remote" (sigue solo el enlace) | "none".
 func (h *OpportunityHandler) Review(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -247,7 +256,106 @@ func (h *OpportunityHandler) Review(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "reviewed"})
+	pdf := "none"
+	switch kerr := h.keepPDF(r.Context(), id); {
+	case kerr == nil:
+		pdf = "kept"
+	case errors.Is(kerr, errNoPDF):
+	default:
+		slog.Warn("guardar fondo: no se pudo conservar el PDF", "opportunity", id, "err", kerr)
+		pdf = "remote"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reviewed", "pdf": pdf})
+}
+
+// Unreview saca el fondo de Guardados (vuelve a Por revisar).
+func (h *OpportunityHandler) Unreview(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if err := h.Opportunities.Unreview(r.Context(), id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unreviewed"})
+}
+
+var errNoPDF = errors.New("el fondo no tiene PDF")
+
+// keepPDF marca como guardado el PDF de un fondo; si no está en disco y hay
+// enlace remoto, lo baja primero (con los topes del crawler).
+func (h *OpportunityHandler) keepPDF(ctx context.Context, id uuid.UUID) error {
+	if h.Documents == nil {
+		return errNoPDF
+	}
+	if ok, err := h.Documents.KeepForOpportunity(ctx, id); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
+	opp, err := h.Opportunities.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	remote := opp.DocumentRemoteURL
+	if remote == "" && opp.SourceKind == "pdf" {
+		remote = opp.SourceURL
+	}
+	if remote == "" {
+		return errNoPDF
+	}
+	fetch := h.Fetch
+	if fetch == nil {
+		fetch = crawler.FetchPDF
+	}
+	dctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	doc, err := crawler.DownloadDocumentWith(dctx, h.Documents, h.DataDir, remote, fetch)
+	if err != nil {
+		return err
+	}
+	if err := h.Opportunities.SetDocument(ctx, id, doc.ID); err != nil {
+		return err
+	}
+	return h.Documents.SetKept(ctx, doc.ID, true)
+}
+
+// KeepDocument guarda solo el PDF del fondo (el fondo no cambia).
+func (h *OpportunityHandler) KeepDocument(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	switch err := h.keepPDF(r.Context(), id); {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "kept"})
+	case errors.Is(err, errNoPDF), errors.Is(err, pgx.ErrNoRows):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	default:
+		slog.Warn("guardar PDF", "opportunity", id, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "no se pudo bajar el PDF"})
+	}
+}
+
+// UnkeepDocument deja de guardar el PDF del fondo (la retención vuelve a aplicarle).
+func (h *OpportunityHandler) UnkeepDocument(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if h.Documents == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if ok, err := h.Documents.UnkeepForOpportunity(r.Context(), id); err != nil || !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unkept"})
 }
 
 // RefreshStatuses updates all opportunity statuses based on deadlines.
@@ -262,7 +370,8 @@ func (h *OpportunityHandler) RefreshStatuses(w http.ResponseWriter, r *http.Requ
 
 var reSHA = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// Document sirve la copia local del PDF de un fondo (inline).
+// Document sirve la copia local del PDF de un fondo: inline, o con
+// ?download=1 como descarga con un nombre legible.
 func (h *OpportunityHandler) Document(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -270,7 +379,90 @@ func (h *OpportunityHandler) Document(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, sha, err := h.Opportunities.DocumentFor(r.Context(), id)
-	if err != nil || !reSHA.MatchString(sha) || h.DataDir == "" {
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	name := sha[:min(12, len(sha))]
+	if opp, err := h.Opportunities.GetByID(r.Context(), id); err == nil {
+		name = PDFFileName(opp.Reference, opp.Title, name)
+	}
+	h.servePDF(w, r, sha, name)
+}
+
+// DocumentFile sirve un PDF por el id del documento (lista de PDF guardados).
+func (h *OpportunityHandler) DocumentFile(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil || h.Documents == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	sha, err := h.Documents.SHAFor(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	name := sha[:min(12, len(sha))]
+	if kept, _, err := h.Documents.ListKept(r.Context()); err == nil {
+		for _, k := range kept {
+			if k.ID == id {
+				name = PDFFileName(k.Reference, k.Title, name)
+			}
+		}
+	}
+	h.servePDF(w, r, sha, name)
+}
+
+// UnkeepDocumentByID suelta un PDF desde la lista de PDF guardados.
+func (h *OpportunityHandler) UnkeepDocumentByID(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil || h.Documents == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if err := h.Documents.SetKept(r.Context(), id, false); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unkept"})
+}
+
+// KeptDocuments lista los PDF guardados y el espacio que ocupan: kept_bytes
+// (los guardados) y total_bytes (toda la carpeta de datos de Folio).
+func (h *OpportunityHandler) KeptDocuments(w http.ResponseWriter, r *http.Request) {
+	if h.Documents == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"documents": []models.KeptDoc{}, "kept_bytes": 0, "total_bytes": 0})
+		return
+	}
+	docs, kept, err := h.Documents.ListKept(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"documents": docs, "count": len(docs),
+		"kept_bytes": kept, "total_bytes": dirSize(h.DataDir)})
+}
+
+// dirSize suma el tamaño de los archivos de una carpeta (sin seguir enlaces).
+func dirSize(root string) int64 {
+	if root == "" {
+		return 0
+	}
+	var n int64
+	_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil && info.Mode().IsRegular() {
+			n += info.Size()
+		}
+		return nil
+	})
+	return n
+}
+
+func (h *OpportunityHandler) servePDF(w http.ResponseWriter, r *http.Request, sha, name string) {
+	if !reSHA.MatchString(sha) || h.DataDir == "" {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
@@ -286,9 +478,35 @@ func (h *OpportunityHandler) Document(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	disp := "inline"
+	if boolParam(r, "download") != nil && *boolParam(r, "download") {
+		disp = "attachment"
+	}
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", `inline; filename="`+sha[:12]+`.pdf"`)
+	w.Header().Set("Content-Disposition", disp+`; filename="`+name+`"`)
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(w, r, "", info.ModTime(), f)
+}
+
+var reNotName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+var asciiFold = strings.NewReplacer("á", "a", "é", "e", "í", "i", "ó", "o", "ú", "u", "ü", "u", "ñ", "n",
+	"Á", "A", "É", "E", "Í", "I", "Ó", "O", "Ú", "U", "Ü", "U", "Ñ", "N")
+
+// PDFFileName arma «<referencia o título corto>.pdf»: solo letras, números,
+// guion y punto; si no queda nada usa fallback.
+func PDFFileName(reference, title, fallback string) string {
+	base := strings.TrimSpace(reference)
+	if base == "" {
+		base = strings.TrimSpace(title)
+	}
+	base = reNotName.ReplaceAllString(asciiFold.Replace(base), "-")
+	base = strings.Trim(base, "-._")
+	if len(base) > 60 {
+		base = strings.Trim(base[:60], "-._")
+	}
+	if base == "" {
+		base = fallback
+	}
+	return base + ".pdf"
 }
