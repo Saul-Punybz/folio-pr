@@ -122,6 +122,60 @@ func SplitHTMLRows(rawHTML, baseURL string) []Row {
 		}
 		rows = append(rows, r)
 	})
+	rows = append(rows, splitLinkRows(doc, base, seen)...)
+	return rows
+}
+
+// splitLinkRows: listados donde el aviso ES el texto del enlace (párrafos o
+// celdas sueltas con un <a> a un PDF/documento, sin <li> ni <tr> alrededor),
+// como la lista de avisos de Bayamón. La fila es el texto del enlace, con el
+// encabezado en negrita que lo precede («Aviso de Subasta – Publicado en El
+// Expresso el 8 de octubre de 2026») para que la fecha y el tipo viajen con él.
+func splitLinkRows(doc *goquery.Document, base *url.URL, seen map[string]bool) []Row {
+	var rows []Row
+	heading := ""
+	doc.Find("p, h1, h2, h3, h4, h5, h6, div").Each(func(_ int, s *goquery.Selection) {
+		if len(s.Nodes) == 0 || s.Find("p, div, h1, h2, h3, h4, h5, h6, li, tr, table").Length() > 0 {
+			return // solo hojas
+		}
+		if s.ParentsFiltered("li, tr, article, table").Length() > 0 {
+			return // ya lo cubre la fila li/tr
+		}
+		links := s.Find("a[href]")
+		text := nodeText(s.Nodes[0])
+		// Encabezado: un bloque en negrita/título sin enlaces.
+		if links.Length() == 0 {
+			if n := utf8.RuneCountInString(text); n >= 8 && n <= 200 &&
+				(s.Find("strong, b").Length() > 0 || goquery.NodeName(s) != "p" && goquery.NodeName(s) != "div") {
+				heading = strings.ReplaceAll(text, "\n", " ")
+			}
+			return
+		}
+		// Un párrafo puede traer varios enlaces separados por <br>: uno por línea.
+		links.Each(func(_ int, a *goquery.Selection) {
+			href := strings.TrimSpace(a.AttrOr("href", ""))
+			lt := tidyLines(strings.ReplaceAll(a.Text(), "\n", " "))
+			if href == "" || strings.HasPrefix(href, "#") || strings.HasPrefix(strings.ToLower(href), "javascript:") ||
+				strings.HasPrefix(strings.ToLower(href), "mailto:") || utf8.RuneCountInString(lt) < minRowRunes {
+				return
+			}
+			u, err := url.Parse(href)
+			if err != nil || base == nil {
+				return
+			}
+			abs := base.ResolveReference(u)
+			abs.Fragment = ""
+			text := lt
+			if heading != "" {
+				text = heading + "\n" + lt
+			}
+			if utf8.RuneCountInString(text) > maxRowRunes || seen[text] {
+				return
+			}
+			seen[text] = true
+			rows = append(rows, Row{Text: text, Link: abs.String(), LinkText: lt})
+		})
+	})
 	return rows
 }
 

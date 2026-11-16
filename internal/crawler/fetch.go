@@ -44,6 +44,8 @@ type FetchResult struct {
 	IsPDF         bool   // por Content-Type o firma %PDF-
 	TooLarge      bool   // pasó de MaxDocumentBytes: se descarta
 	FinalURL      string // tras redirecciones
+	ETag          string // validadores del servidor (para no volver a bajar un PDF)
+	LastModified  string
 	Links         []DiscoveredLink
 	ImageURL      string
 	Description   string
@@ -139,10 +141,7 @@ func FetchPage(ctx context.Context, pageURL string, allowedDomains map[string]bo
 		linkDomain := strings.ToLower(abs.Hostname())
 		isExternal := linkDomain != baseDomain && !allowedDomains[linkDomain]
 
-		anchor := strings.TrimSpace(e.Text)
-		if len(anchor) > 200 {
-			anchor = anchor[:200]
-		}
+		anchor := anchorWithContext(e)
 
 		mu.Lock()
 		result.Links = append(result.Links, DiscoveredLink{
@@ -187,6 +186,14 @@ func FetchPage(ctx context.Context, pageURL string, allowedDomains map[string]bo
 
 	if result.TooLarge {
 		return &result, fmt.Errorf("fetch %s: archivo de más de %d MB", pageURL, MaxDocumentBytes>>20)
+	}
+
+	// Portales de subastas que publican JSON (Granicus): se vuelve texto para
+	// la huella de cambios; la extracción lee el JSON tal cual (granicus.go).
+	if txt, ok := granicusText(result.RawHTML); ok {
+		result.CleanText = txt
+		result.ContentHash = scraper.HashContent(txt)
+		return &result, nil
 	}
 
 	// Extract article content (strips nav, footer, sidebar, ads, scripts)

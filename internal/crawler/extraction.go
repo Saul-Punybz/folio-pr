@@ -106,12 +106,21 @@ func extractPage(ctx context.Context, deps Deps, dom *models.CrawlDomain, p mode
 			return err
 		}
 		src.scanned = doc.Scanned
+		if doc.Path == "" {
+			src.documentID = nil // el archivo se borró (retención): el fondo apunta al enlace remoto
+		}
 		if doc.Scanned {
 			return scannedCandidate(ctx, deps, src, p, pageCtx, st)
 		}
 	}
 
 	ctxLine := contextLine(dom, pageCtx)
+
+	// 0. Portal de subastas que publica JSON (Granicus): una fila por subasta
+	// abierta; no se prueba el texto entero.
+	if src.kind == "pagina" && isGranicusJSON(p.RawHTML) {
+		return saveRows(ctx, deps, src, granicusRows(p.RawHTML, p.URL), ctxLine, now, true, st)
+	}
 
 	// 1. El texto entero (un aviso suelto o un PDF de una convocatoria).
 	whole := p.CleanText
@@ -144,14 +153,32 @@ func extractPage(ctx context.Context, deps Deps, dom *models.CrawlDomain, p mode
 			segments = append(segments, Row{Text: b})
 		}
 	}
+	return saveRows(ctx, deps, src, segments, ctxLine, now, false, st)
+}
+
+// saveRows pasa cada fila de un listado por el extractor y guarda las que
+// parecen convocatoria abierta.
+func saveRows(ctx context.Context, deps Deps, src source, segments []Row, ctxLine string, now time.Time, titleFromLink bool, st *ExtractionStats) error {
 	var firstErr error
 	for _, c := range RowCandidates(segments, ctxLine, now) {
 		r, f := c.Row, c.Found
+		if titleFromLink && r.LinkText != "" { // portal de subastas: el nombre ya viene limpio
+			f.Title = truncate(r.LinkText, 160)
+			f.Evidence["title"] = f.Title
+		}
 		rowSrc := src
 		link := r.Link
 		if link == "" || LooksLikePDF(link) {
-			if LooksLikePDF(link) && rowSrc.documentURL == "" {
-				rowSrc.documentURL = link // el PDF de la fila, como enlace remoto
+			if LooksLikePDF(link) {
+				// La fila apunta a un PDF y no trae fecha límite: la convocatoria
+				// real es el PDF (que se baja y se lee aparte, con su fecha). Una
+				// fila sin fecha de un aviso viejo no es un fondo nuevo.
+				if f.Deadline == nil && ClassifyPDFLink(r.LinkText+" "+r.Text, link, now).Download {
+					continue
+				}
+				if rowSrc.documentURL == "" {
+					rowSrc.documentURL = link // el PDF de la fila, como enlace remoto
+				}
 			}
 			link = src.pageURL
 		}
@@ -296,15 +323,47 @@ func agencyName(dom *models.CrawlDomain, fromText string) string {
 	return ""
 }
 
-// levelFor: el nivel del dominio; una fila del RUS de un municipio es municipal.
+// Prefijos del nombre de la ENTIDAD que fijan el nivel sin mirar el dominio.
+var (
+	municipalPrefixes = []string{"municipio", "gobierno municipal", "ciudad de ", "alcaldia", "legislatura municipal"}
+	statePrefixes     = []string{"autoridad", "departamento", "administracion", "oficina", "comision", "corporacion",
+		"universidad", "junta", "agencia", "instituto", "secretaria", "negociado", "contralor", "procurador",
+		"fondo ", "compania", "banco", "consejo", "policia de puerto rico", "guardia nacional", "cuerpo de",
+		"programa ", "servicio ", "gobierno de puerto rico", "estado libre asociado", "centro comprensivo",
+		"centro cardiovascular", "autoridad de", "department", "authority", "commonwealth"}
+)
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// levelFor: el nivel sale de la ENTIDAD que convoca cuando su nombre lo dice
+// («Municipio de…», «Municipio Autónomo de…» → municipal; «Autoridad»,
+// «Departamento», «Administración»… → estatal), así una fila de un municipio
+// en el Registro Único de Subastas es municipal y una fila de una agencia en
+// la página de un municipio es estatal. Si el nombre no lo dice, manda el
+// nivel del dominio. Lo federal nunca se rebaja.
 func levelFor(dom *models.CrawlDomain, agency string) string {
-	if a := fold(agency); strings.HasPrefix(a, "municipio") || strings.HasPrefix(a, "gobierno municipal") {
-		return "municipal"
-	}
+	domLevel := "estatal"
 	if dom != nil && models.ValidLevel(dom.Level) {
-		return dom.Level
+		domLevel = dom.Level
 	}
-	return "estatal"
+	if domLevel == "federal" {
+		return domLevel
+	}
+	a := fold(strings.TrimSpace(agency))
+	switch {
+	case hasAnyPrefix(a, municipalPrefixes):
+		return "municipal"
+	case hasAnyPrefix(a, statePrefixes):
+		return "estatal"
+	}
+	return domLevel
 }
 
 // stripSiteSuffix: "Licitación 26J-16246-R1 | ASG Puerto Rico" → "Licitación 26J-16246-R1".

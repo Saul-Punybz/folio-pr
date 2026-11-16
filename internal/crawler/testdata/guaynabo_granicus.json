@@ -1,0 +1,79 @@
+{
+ "Data": [
+  {
+   "AuctionId": 145,
+   "Number": "27-RFP-001",
+   "AuctionName": "REQUEST TO PROPOSAL A/E DESING SERVICES FOR INFRASTRUCTURE MITIGATION PROGRAMS PROCUREMENT PROCESS NO. (27-RFP-001) UNDER COMMUNITY DEVELOPMENT BLOCK GRANT MITIGATION - CDBG-MIT SLOPE STABILITATION RIO GUAYNABO Project # INFRA-MIT-STR-022",
+   "AuctionType": "Solicitud de Propuesta (RFP)",
+   "AuctionStage": "Publicada",
+   "PublicationDate": "/Date(1790946000000)/",
+   "SealedAttachmentsDownloadEndDate": "/Date(1791918000000)/",
+   "ClosingDate": "/Date(1796391000000)/",
+   "ServiceTypeCode": 0,
+   "ServiceTypesDescription": " Construcción : Construcción, reconstrucción y reparación de obras o mejoras públicas, Servicios Profesionales : Servicio de Arquitectura/Ingenieria (A/E), Servicio de Inspección, Estudios y Permisos"
+  },
+  {
+   "AuctionId": 156,
+   "Number": "27-F-050",
+   "AuctionName": "SLOPE STABILIZATION & RETAINING WALL DESIGN AT # 2 STREET, LOPEZ CASES SECTOR, GUARAGUAO WARD, GUAYNABO, PUERTO RICO",
+   "AuctionType": "Subasta de construcción",
+   "AuctionStage": "Publicada",
+   "PublicationDate": "/Date(1793188800000)/",
+   "SealedAttachmentsDownloadEndDate": "/Date(1793905200000)/",
+   "ClosingDate": "/Date(1795527000000)/",
+   "ServiceTypeCode": 0,
+   "ServiceTypesDescription": " Construcción : Construcción, reconstrucción y reparación de obras o mejoras públicas"
+  },
+  {
+   "AuctionId": 150,
+   "Number": "27-F-044",
+   "AuctionName": "VENTA DE BIEN INMUEBLE MUNICIPAL FINCA PARQUE DE LOS NIÑOS, AVENIDA ARBOLOTE, BARRIO PUEBLO, GUAYNABO, P.R.",
+   "AuctionType": "Subasta por ventas",
+   "AuctionStage": "Publicada",
+   "PublicationDate": "/Date(1792152000000)/",
+   "SealedAttachmentsDownloadEndDate": "/Date(1793214000000)/",
+   "ClosingDate": "/Date(1795527000000)/",
+   "ServiceTypeCode": 0,
+   "ServiceTypesDescription": " VENTAS : VENTAS"
+  },
+  {
+   "AuctionId": 149,
+   "Number": "27-F-043",
+   "AuctionName": "RE-CONSTRUCTION OF ROUNDABOUTS (PW10745-220911 ROTONDAS LUIS VIGOREAUX, AMELIA BARCO, AMELIA WATERFRONT (PELICANO)PW10754-366500ROTONDAS PARKVILLE, SAN IGNACIO, CAÑA, BELLO MONTE, BOULEVARD DEL DEPORTE Y CARVAJAL;PW10832-366501 ROTONDA URBINA",
+   "AuctionType": "Subasta de construcción",
+   "AuctionStage": "En evaluación",
+   "PublicationDate": "/Date(1791896400000)/",
+   "SealedAttachmentsDownloadEndDate": null,
+   "ClosingDate": "/Date(1794576600000)/",
+   "ServiceTypeCode": 0,
+   "ServiceTypesDescription": " Construcción : Construcción, reconstrucción y reparación de obras o mejoras públicas"
+  },
+  {
+   "AuctionId": 144,
+   "Number": "27-F-039",
+   "AuctionName": "Servicios de Construcción/Construction Services For City Revitalization Program Procurement PR-886 INT. PR-199, Bo Pueblo Guaynabo, PR 00970 Multilevel Parking Building at Mario “Quijote” Morales Complex Project # PR-CRP-001060",
+   "AuctionType": "Subasta de construcción",
+   "AuctionStage": "Publicada",
+   "PublicationDate": "/Date(1789650000000)/",
+   "SealedAttachmentsDownloadEndDate": "/Date(1790622000000)/",
+   "ClosingDate": "/Date(1795008600000)/",
+   "ServiceTypeCode": 0,
+   "ServiceTypesDescription": " Construcción : Construcción, reconstrucción y reparación de obras o mejoras públicas"
+  },
+  {
+   "AuctionId": 143,
+   "Number": "27-F-038",
+   "AuctionName": "ADQUISICIÓN DE VAN DE CARGA DE TECHO ALTO, DOBLE RUEDA TRASERA, GASOLINA",
+   "AuctionType": "Adquisición de Compra y Suministro",
+   "AuctionStage": "En evaluación",
+   "PublicationDate": "/Date(1789041600000)/",
+   "SealedAttachmentsDownloadEndDate": "/Date(1789585200000)/",
+   "ClosingDate": "/Date(1790775000000)/",
+   "ServiceTypeCode": 0,
+   "ServiceTypesDescription": " Servicios : Servicios de transportación, Suministros : Vehículos de motor (liviano y pesado)"
+  }
+ ],
+ "Total": 6,
+ "AggregateResults": null,
+ "Errors": null
+}

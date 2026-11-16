@@ -61,6 +61,11 @@ func DocumentsDir(dataDir string) string { return filepath.Join(dataDir, "docume
 // CrawlStats resume una corrida (además de lo que queda en crawl_runs).
 type CrawlStats struct {
 	Pages, PDFReadable, PDFScanned, PDFRejected, RobotsSkipped int
+	// PDFFiltered: enlaces a PDF que el filtro descartó sin pedirlos; PDFUnchanged:
+	// ya se tenían y el servidor dice que no cambiaron; PDFCapped: pasaron del tope
+	// por dominio; PDFBytes: lo que sí se bajó.
+	PDFFiltered, PDFUnchanged, PDFCapped int
+	PDFBytes                             int64
 }
 
 // hostGate espacia las peticiones por host: mínimo 1 s o el Crawl-delay de robots.txt.
@@ -133,6 +138,7 @@ func RunCrawl(ctx context.Context, deps Deps, dailyBudget int) CrawlStats {
 	// Tracking
 	domainsVisited := make(map[uuid.UUID]bool)
 	totalCrawled := 0
+	pdfDownloads := map[uuid.UUID]int{} // PDF bajados por dominio en esta corrida
 
 	for totalCrawled < dailyBudget {
 		if ctx.Err() != nil {
@@ -184,6 +190,22 @@ func RunCrawl(ctx context.Context, deps Deps, dailyBudget int) CrawlStats {
 				continue
 			}
 
+			// PDF: primero el filtro (sin tocar la red) y el tope por dominio.
+			var pdfVerdict PDFVerdict
+			if isPDFItem {
+				pdfVerdict = ClassifyPDFLink(item.AnchorText, item.URL, time.Now())
+				if !pdfVerdict.Download {
+					_ = deps.Queue.MarkSkipped(ctx, item.ID)
+					stats.PDFFiltered++
+					continue
+				}
+				if pdfDownloads[domainID] >= maxPDFPerDomainRun {
+					_ = deps.Queue.MarkSkipped(ctx, item.ID)
+					stats.PDFCapped++
+					continue
+				}
+			}
+
 			// robots.txt antes de cada petición, y la pausa por host.
 			if !deps.Robots.Allowed(ctx, item.URL) {
 				_ = deps.Queue.MarkFailed(ctx, item.ID, "robots.txt no lo permite")
@@ -194,9 +216,31 @@ func RunCrawl(ctx context.Context, deps Deps, dailyBudget int) CrawlStats {
 				break
 			}
 
+			// PDF ya conocido: un HEAD basta para saber si cambió.
+			if isPDFItem {
+				if known, _ := deps.Documents.KnownPDF(ctx, scraper.HashURL(item.URL)); known != nil {
+					pctx, pcancel := context.WithTimeout(ctx, fetchTimeout)
+					probe, perr := ProbePDF(pctx, item.URL)
+					pcancel()
+					totalCrawled++
+					if perr == nil && probe.Unchanged(known.ETag, known.LastModified, known.SizeBytes) {
+						_ = deps.Queue.MarkDone(ctx, item.ID)
+						stats.PDFUnchanged++
+						continue
+					}
+				}
+			}
+
 			// Fetch page
+			var result *FetchResult
+			var fetchErr error
 			fetchCtx, fetchCancel := context.WithTimeout(ctx, 2*fetchTimeout)
-			result, fetchErr := FetchPage(fetchCtx, item.URL, allowedSet)
+			if isPDFItem {
+				pdfDownloads[domainID]++
+				result, fetchErr = FetchPDF(fetchCtx, item.URL, pdfVerdict.MaxBytes)
+			} else {
+				result, fetchErr = FetchPage(fetchCtx, item.URL, allowedSet)
+			}
 			fetchCancel()
 			totalCrawled++
 
@@ -313,6 +357,10 @@ func RunCrawl(ctx context.Context, deps Deps, dailyBudget int) CrawlStats {
 		"pdf_scanned", stats.PDFScanned,
 		"pdf_rejected", stats.PDFRejected,
 		"robots_skipped", stats.RobotsSkipped,
+		"pdf_filtered", stats.PDFFiltered,
+		"pdf_unchanged", stats.PDFUnchanged,
+		"pdf_capped", stats.PDFCapped,
+		"pdf_mb", stats.PDFBytes>>20,
 	)
 	return stats
 }
@@ -356,6 +404,11 @@ func recordLinks(ctx context.Context, deps Deps, item models.CrawlQueueItem, pag
 				continue
 			}
 			if srcDomain != nil && item.Depth+1 > srcDomain.MaxDepth+1 {
+				continue
+			}
+			// Lo que claramente no es convocatoria ni se pone en la cola
+			// (y no gasta uno de los puestos de la página).
+			if !ClassifyPDFLink(link.AnchorText, link.URL, time.Now()).Download {
 				continue
 			}
 			pdfs++
@@ -457,7 +510,12 @@ func savePDF(ctx context.Context, deps Deps, item models.CrawlQueueItem, domainI
 		AnchorText:    item.AnchorText,
 		SourcePageID:  item.DiscoveredBy,
 	}
-	return deps.Pages.Upsert(ctx, page)
+	isNew, err := deps.Pages.Upsert(ctx, page)
+	if err == nil {
+		stats.PDFBytes += int64(len(res.Body))
+		_ = deps.Documents.SetValidators(ctx, page.URLHash, res.ETag, res.LastModified)
+	}
+	return isNew, err
 }
 
 // pdfFileTitle: nombre del archivo, legible ("Aviso-RFP-S-2027_018").
