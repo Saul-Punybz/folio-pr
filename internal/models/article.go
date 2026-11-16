@@ -68,7 +68,8 @@ func (s *ArticleStore) ListByStatus(ctx context.Context, status string, limit, o
 
 	var args []any
 	args = append(args, status)
-	where := "WHERE status = $1"
+	// Grants y Federal son documentos de fondos (Federal Register, etc.), no noticias.
+	where := "WHERE status = $1 AND region NOT IN ('Grants', 'Federal')"
 	argN := 2
 	if status == "inbox" {
 		// El Inbox muestra solo la última semana; lo anterior ya pasó a Archivo.
@@ -305,7 +306,8 @@ func (s *ArticleStore) Search(ctx context.Context, query string, from, to time.T
 		limit = 50
 	}
 
-	var conditions []string
+	// Grants y Federal son documentos de fondos, no noticias: no salen en Archivo.
+	conditions := []string{"region NOT IN ('Grants', 'Federal')"}
 	var args []any
 	argN := 1
 	hasQuery := query != ""

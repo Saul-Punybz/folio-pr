@@ -17,7 +17,12 @@ const TAG_OPTIONS = [
 
 const PAGE = 30;
 
-const REGION_OPTIONS = ['PR', 'US', 'Federal', 'Grants', 'Local'];
+const REGION_OPTIONS = ['PR', 'US', 'Global'];
+// Región de una noticia, en palabras de la usuaria. Grants/Federal no son noticias:
+// esos documentos van a Fondos y no se muestran aquí.
+const REGION_LABELS: Record<string, string> = { PR: 'Puerto Rico', US: 'EE. UU.', Global: 'Mundo' };
+const regionLabel = (r: string) => REGION_LABELS[r] ?? r;
+const isOutsidePR = (r: string) => r === 'US' || r === 'Global';
 
 const DATE_OPTIONS = [
   { label: 'Todo', value: '' },
@@ -97,7 +102,7 @@ function QuickAddSourceModal({ onClose, onCreated }: { onClose: () => void; onCr
           <span className="field-label">Región</span>
           <div className="chip-row">
             {REGION_OPTIONS.map((r) => (
-              <button key={r} type="button" className="chip" aria-pressed={region === r} onClick={() => setRegion(r)}>{r}</button>
+              <button key={r} type="button" className="chip" aria-pressed={region === r} onClick={() => setRegion(r)}>{regionLabel(r)}</button>
             ))}
           </div>
         </div>
@@ -147,7 +152,7 @@ function CollectModal({ onClose, onCollected }: { onClose: () => void; onCollect
           <span className="field-label">Región</span>
           <div className="chip-row">
             {REGION_OPTIONS.map((r) => (
-              <button key={r} type="button" className="chip" aria-pressed={region === r} onClick={() => setRegion(r)}>{r}</button>
+              <button key={r} type="button" className="chip" aria-pressed={region === r} onClick={() => setRegion(r)}>{regionLabel(r)}</button>
             ))}
           </div>
         </div>
@@ -394,7 +399,8 @@ export default function InboxFeed() {
     }
     if (activeTag && !a.tags?.some((t) => t === activeTag)) return false;
     if (sourceFilter && a.source !== sourceFilter) return false;
-    if (regionFilter && a.region !== regionFilter) return false;
+    if (a.region === 'Grants' || a.region === 'Federal') return false;
+    if (regionFilter === 'fuera' ? !isOutsidePR(a.region) : regionFilter && a.region !== regionFilter) return false;
     return true;
   });
 
@@ -434,10 +440,9 @@ export default function InboxFeed() {
 
       {/* Región */}
       <div className="chip-row chip-scroll mb-3" role="group" aria-label="Región">
-        <button type="button" className="chip" aria-pressed={regionFilter === ''} onClick={() => setRegionFilter('')}>Todas las regiones</button>
-        {REGION_OPTIONS.map((r) => (
-          <button key={r} type="button" className="chip" aria-pressed={regionFilter === r} onClick={() => setRegionFilter(regionFilter === r ? '' : r)}>{r}</button>
-        ))}
+        <button type="button" className="chip" aria-pressed={regionFilter === ''} onClick={() => setRegionFilter('')}>Todas</button>
+        <button type="button" className="chip" aria-pressed={regionFilter === 'PR'} onClick={() => setRegionFilter(regionFilter === 'PR' ? '' : 'PR')}>Puerto Rico</button>
+        <button type="button" className="chip" aria-pressed={regionFilter === 'fuera'} onClick={() => setRegionFilter(regionFilter === 'fuera' ? '' : 'fuera')}>Fuera de PR</button>
       </div>
 
       {/* Temas */}
