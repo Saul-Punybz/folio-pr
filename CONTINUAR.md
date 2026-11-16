@@ -128,6 +128,14 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
   - App reemplazada en la Mac de Saul el 16 nov: respaldo previo `Folio2/respaldos/antes-de-actualizar-2026-11-16.sql.gz` (70 MB), migraciones 028-030 aplicadas, páginas 200 y ruta inexistente 404.
   - Pendiente: misión y marcas de la organización (para Grants.gov y vigilancias); probar en la MacBook de la usuaria y Gatekeeper; nada de esto se ha visto en pantalla salvo lo que Saul mire.
 
+- 16 nov 2026 — **CIERRE DE LA OBRA. Versión final entregada** (commit `3ccb1b5`, unida a `main`). `build/Folio.zip` (33 MB) es lo que se instala; guía en `docs/INSTALAR.md`.
+  - Qué hace: noticias de PR y de fuera sobre PR (Inbox 7 días, Borrar de verdad, Archivo para siempre); Marcas (Project Makers, Vimenti, Oasis 360, PSI) con noticias, sitios propios, Bluesky, Mastodon, YouTube, podcasts y Alertas de Google, cada mención archivada para siempre con copia, resumen y cita APA, y bibliografía exportable; Fondos (páginas y PDF de agencias, 3 municipios, Grants.gov para nonprofits) con Guardar y PDF guardados.
+  - Pruebas: 15 paquetes en verde (`go test -race ./...`), tsc y build del frontend. Versión final abierta en la Mac de Saul el 16 nov: migraciones 032-036 aplicadas, páginas 200, API sin sesión 401, todo solo en 127.0.0.1. Respaldo previo: `Folio2/respaldos/antes-de-version-final-2026-11-16.sql.gz` (97 MB).
+  - Archivo de menciones (corrida de prueba, 85): 38 con copia completa, 20 parcial, 27 sin copia (Google News no da la URL real; News is My Business bloquea a FolioBot). Una mención falsa en PSI (agencia de Auckland) se borra a mano.
+  - Pendiente fuera del código: instalar en la MacBook de la usuaria con `docs/INSTALAR.md` (Saul, 16 nov por la tarde); crear las Alertas de Google por marca; decidir si se añaden Bárbara Rivera Batista (Vimenti) y Lucas Arzola (Project Makers) como personas clave; el pie de projectmakerspr.org enlaza «projctmakerspr» (errata).
+  - No verificado: nada se ha visto en pantalla salvo lo que Saul miró; Gatekeeper en la Mac de ella (la línea `xattr` es plan B); APA de podcast adaptado del inglés.
+  - Futuro: ver «Para el futuro» (Palabras de tendencias, Conectar Meta) y, de `VISION.md`, páginas fijas con «qué cambió», carpetas y citas en Guardados de noticias, Escritos, email y Wix. GDELT existe en `internal/gdelt` pero está apagado (0 resultados para las marcas).
+
 ## Para el futuro
 
 ### Palabras de tendencias (pedido de Saul, 16 nov 2026; no construir hasta que lo pida)
