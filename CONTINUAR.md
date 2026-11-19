@@ -138,6 +138,8 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
 
 - 19 nov 2026 — **Instalador de una línea** (`scripts/instalar.sh`, release **v2.0.0** en GitHub con `Folio.zip` + `instalar.sh`): `curl -fsSL https://github.com/Saul-Punybz/folio-pr/releases/latest/download/instalar.sh | bash`. Sin cuarentena (curl), LaunchAgent `pr.folio.app` (RunAtLoad, reinicia si se cae, «Cerrar Folio» lo deja cerrado), espera a 127.0.0.1:47615 y abre el navegador. Probado desde el release con `FOLIO_DEST`/`FOLIO_NO_START` (firma OK, cero xattr); el arranque/LaunchAgent no se probó en la Mac de Saul para no tocar su Folio. Borrador de correo con la línea para bpaganrosa@gmail.com en Gmail (Saul lo envía). Para actualizar: `make mac` y subir `Folio.zip` a un release nuevo marcado latest.
 
+- 19 nov 2026 — README reescrito con lo que Folio hace hoy (instalación de una línea, Noticias, Marcas, Fondos, lo que no hace); descripción y etiquetas del repo en GitHub sin «AI-powered»/Ollama. No hay wiki (activada, sin páginas). Release viejo v1.0.0 (marzo, Ollama, `.dmg`) sigue publicado: Saul decide si se borra. Resumen de la sesión: `SESION_19NOV2026.md`.
+
 ## Para el futuro
 
 ### Palabras de tendencias (pedido de Saul, 16 nov 2026; no construir hasta que lo pida)
