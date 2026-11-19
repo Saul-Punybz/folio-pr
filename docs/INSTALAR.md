@@ -1,5 +1,17 @@
 # Instalar Folio en la MacBook
 
+## La forma fácil (recomendada)
+
+Abre **Terminal** (Cmd + Espacio, escribe "Terminal") y pega:
+
+```
+curl -fsSL https://github.com/Saul-Punybz/folio-pr/releases/latest/download/instalar.sh | bash
+```
+
+Comprueba el chip, baja Folio sin la marca de cuarentena (Gatekeeper no sale), lo instala en Aplicaciones, lo deja arrancando solo al iniciar sesión y abre el navegador. La misma línea actualiza; los datos se quedan. Con el zip a mano: `bash instalar.sh ~/Downloads/Folio.zip`.
+
+Luego sigue en **3. Crear su acceso**. Los pasos 1 y 2 son la forma manual.
+
 Para hacerlo una sola vez, con la usuaria al lado. Toma unos 15 minutos más la primera búsqueda (unos 12 minutos que corren solos).
 
 ## Antes de empezar

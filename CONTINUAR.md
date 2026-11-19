@@ -136,6 +136,8 @@ Por probar con PDF reales antes de prometer nada: la calidad de la librería de 
   - No verificado: nada se ha visto en pantalla salvo lo que Saul miró; Gatekeeper en la Mac de ella (la línea `xattr` es plan B); APA de podcast adaptado del inglés.
   - Futuro: ver «Para el futuro» (Palabras de tendencias, Conectar Meta) y, de `VISION.md`, páginas fijas con «qué cambió», carpetas y citas en Guardados de noticias, Escritos, email y Wix. GDELT existe en `internal/gdelt` pero está apagado (0 resultados para las marcas).
 
+- 19 nov 2026 — **Instalador de una línea** (`scripts/instalar.sh`, release **v2.0.0** en GitHub con `Folio.zip` + `instalar.sh`): `curl -fsSL https://github.com/Saul-Punybz/folio-pr/releases/latest/download/instalar.sh | bash`. Sin cuarentena (curl), LaunchAgent `pr.folio.app` (RunAtLoad, reinicia si se cae, «Cerrar Folio» lo deja cerrado), espera a 127.0.0.1:47615 y abre el navegador. Probado desde el release con `FOLIO_DEST`/`FOLIO_NO_START` (firma OK, cero xattr); el arranque/LaunchAgent no se probó en la Mac de Saul para no tocar su Folio. Borrador de correo con la línea para bpaganrosa@gmail.com en Gmail (Saul lo envía). Para actualizar: `make mac` y subir `Folio.zip` a un release nuevo marcado latest.
+
 ## Para el futuro
 
 ### Palabras de tendencias (pedido de Saul, 16 nov 2026; no construir hasta que lo pida)
